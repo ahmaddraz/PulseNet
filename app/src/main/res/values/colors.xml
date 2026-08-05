@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="black">#FF000000</color>
+    <color name="white">#FFFFFFFF</color>
+    <color name="color_background">#0A0E1A</color>
+    <color name="color_card_bg">#131A29</color>
+    <color name="color_button_cyan">#00D4FF</color>
+    <color name="color_text_secondary">#7C8699</color>
+    <color name="color_accent_orange">#FF6B35</color>
+    <color name="color_pill_bg">#1A2233</color>
+    <color name="color_placeholder_text">#4C5568</color>
+</resources>

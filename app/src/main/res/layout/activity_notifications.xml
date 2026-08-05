@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/main"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@color/color_background"
+    android:layoutDirection="ltr"
+    android:fitsSystemWindows="true"
+    android:paddingTop="24dp"
+    android:paddingBottom="20dp"
+    android:paddingStart="20dp"
+    android:paddingEnd="20dp">
+
+    <!-- صف الرجوع -->
+    <LinearLayout
+        android:id="@+id/button_back"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="end"
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="←"
+            android:textColor="@color/color_text_secondary"
+            android:textSize="18sp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="5dp"
+            android:text="رجوع"
+            android:textColor="@color/color_text_secondary"
+            android:textSize="12sp" />
+
+    </LinearLayout>
+
+    <!-- العنوان -->
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="10dp"
+        android:text="الإشعارات"
+        android:textColor="@color/white"
+        android:textSize="18sp"
+        android:textStyle="bold"
+        android:gravity="right"
+        android:textAlignment="viewEnd" />
+
+    <!-- نص حالة فارغة -->
+    <TextView
+        android:id="@+id/text_empty_notifications"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="40dp"
+        android:text="ما في أحداث لهلق&#10;لما يكتشف جهازك أجهزة قريبة، رح تظهر هون"
+        android:textColor="@color/color_text_secondary"
+        android:textSize="11sp"
+        android:gravity="center" />
+
+    <!-- الحاوية يلي رح نبني فيها بطاقات الأحداث برمجياً -->
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:layout_marginTop="20dp">
+
+        <LinearLayout
+            android:id="@+id/container_notifications"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical" />
+
+    </ScrollView>
+
+</LinearLayout>

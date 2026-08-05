@@ -1,0 +1,142 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/main"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@color/color_background"
+    android:layoutDirection="ltr"
+    android:fitsSystemWindows="true"
+    android:paddingTop="24dp"
+    android:paddingBottom="20dp"
+    android:paddingStart="20dp"
+    android:paddingEnd="20dp">
+
+    <!-- صف الرجوع -->
+    <LinearLayout
+        android:id="@+id/button_back"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="end"
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="←"
+            android:textColor="@color/color_text_secondary"
+            android:textSize="18sp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="5dp"
+            android:text="رجوع"
+            android:textColor="@color/color_text_secondary"
+            android:textSize="12sp" />
+
+    </LinearLayout>
+
+    <!-- شارة التصنيف -->
+    <TextView
+        android:id="@+id/text_category"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="end"
+        android:layout_marginTop="10dp"
+        android:background="@drawable/bg_badge_orange"
+        android:paddingStart="10dp"
+        android:paddingTop="4dp"
+        android:paddingEnd="10dp"
+        android:paddingBottom="4dp"
+        android:text="طوارئ"
+        android:textColor="@color/color_background"
+        android:textSize="12sp"
+        android:textStyle="bold" />
+
+    <!-- العنوان -->
+    <TextView
+        android:id="@+id/text_title"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="10dp"
+        android:text="انقطاع مياه في الحي الشرقي"
+        android:textColor="@color/white"
+        android:textSize="16sp"
+        android:textStyle="bold"
+        android:gravity="right"
+        android:textAlignment="viewEnd" />
+
+    <!-- الوصف -->
+    <TextView
+        android:id="@+id/text_details"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="10dp"
+        android:text="تم الإبلاغ عن انقطاع كامل للمياه منذ الصباح، يرجى تجنب المنطقة القريبة من محطة الضخ الرئيسية."
+        android:textColor="@color/color_text_secondary"
+        android:textSize="10.5sp"
+        android:gravity="right"
+        android:textAlignment="viewEnd" />
+
+    <!-- معلومات إضافية -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="10dp"
+        android:orientation="vertical">
+
+        <TextView
+            android:id="@+id/text_region"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="📍 الحي الشرقي"
+            android:textColor="@color/color_placeholder_text"
+            android:textSize="11sp"
+            android:gravity="right"
+            android:textAlignment="viewEnd" />
+
+        <TextView
+            android:id="@+id/text_time"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="🕒 منذ 12 دقيقة"
+            android:textColor="@color/color_placeholder_text"
+            android:textSize="11sp"
+            android:gravity="right"
+            android:textAlignment="viewEnd" />
+
+        <TextView
+            android:id="@+id/text_hops"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="🔀 انتقلت عبر قفزتين"
+            android:textColor="@color/color_placeholder_text"
+            android:textSize="11sp"
+            android:gravity="right"
+            android:textAlignment="viewEnd" />
+
+    </LinearLayout>
+
+    <!-- مساحة فاضية تدفع الزر للأسفل -->
+    <View
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:layout_weight="1" />
+
+    <!-- زر تمييز كمقروءة -->
+    <TextView
+        android:id="@+id/button_mark_read"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@drawable/bg_option_inactive"
+        android:paddingTop="10dp"
+        android:paddingBottom="10dp"
+        android:text="تمييز كمقروءة"
+        android:textColor="@color/white"
+        android:textSize="10.5sp"
+        android:gravity="center" />
+
+</LinearLayout>

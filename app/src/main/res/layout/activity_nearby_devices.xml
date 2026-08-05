@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/main"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@color/color_background"
+    android:layoutDirection="ltr"
+    android:fitsSystemWindows="true"
+    android:paddingTop="24dp"
+    android:paddingBottom="20dp"
+    android:paddingStart="20dp"
+    android:paddingEnd="20dp">
+
+    <!-- صف الرجوع -->
+    <LinearLayout
+        android:id="@+id/button_back"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="end"
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="←"
+            android:textColor="@color/color_text_secondary"
+            android:textSize="13sp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="5dp"
+            android:text="رجوع"
+            android:textColor="@color/color_text_secondary"
+            android:textSize="10.5sp" />
+
+    </LinearLayout>
+
+    <!-- العنوان -->
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="10dp"
+        android:text="الأجهزة القريبة"
+        android:textColor="@color/white"
+        android:textSize="15sp"
+        android:textStyle="bold"
+        android:gravity="right"
+        android:textAlignment="viewEnd" />
+
+    <!-- نص حالة (يظهر لما ما في أجهزة، أو يختفي لو في) -->
+    <TextView
+        android:id="@+id/text_empty_state"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="40dp"
+        android:text="بندور على أجهزة PulseNet قريبة منك...&#10;خليك قريب من جهاز تاني عليه نفس التطبيق"
+        android:textColor="@color/color_text_secondary"
+        android:textSize="11sp"
+        android:gravity="center" />
+
+    <!-- الحاوية يلي رح نضيف فيها بطاقات الأجهزة المكتشفة برمجياً -->
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:layout_marginTop="14dp">
+
+        <LinearLayout
+            android:id="@+id/container_devices"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical" />
+
+    </ScrollView>
+
+</LinearLayout>

@@ -215,7 +215,7 @@ public class DatabaseHelper extends SQLiteOpenHelper {
     // ================= بروتوكول الملخص/المقارنة/الطلب =================
 
     /** يبني "ملخص" خفيف لكل معلوماتنا: id + version + hash فقط (بدون التفاصيل الكاملة) */
-    public String getItemsSummaryAsJson() {
+    public String getItemsSummaryAsJson(String senderDeviceId, String senderDeviceName) {
         try {
             org.json.JSONArray summaryArray = new org.json.JSONArray();
             for (Item item : getAllItems()) {
@@ -226,6 +226,8 @@ public class DatabaseHelper extends SQLiteOpenHelper {
                 summaryArray.put(entry);
             }
             org.json.JSONObject envelope = new org.json.JSONObject();
+            envelope.put("senderDeviceId", senderDeviceId);
+            envelope.put("senderDeviceName", senderDeviceName);
             envelope.put("summary", summaryArray);
             return envelope.toString();
         } catch (org.json.JSONException e) {

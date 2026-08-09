@@ -7,7 +7,9 @@ import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothManager;
 import android.content.Intent;
 import android.os.Build;
+import android.os.Handler;
 import android.os.IBinder;
+import android.os.Looper;
 import android.util.Log;
 
 import androidx.core.app.NotificationCompat;
@@ -19,9 +21,12 @@ import com.pulsenet.app.ble.BleScanner;
 import com.pulsenet.app.data.DatabaseHelper;
 import com.pulsenet.app.data.DeviceIdentity;
 
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 public class PulseNetService extends Service {
 
@@ -45,7 +50,11 @@ public class PulseNetService extends Service {
     private final Map<String, Long> lastRangeNotifyTimeByDevice = new HashMap<>();
     private static final long RANGE_NOTIFY_COOLDOWN_MS = 5 * 60 * 1000L;
 
-    private volatile boolean isSyncInProgress = false;
+    // تتبع الأجهزة التي يجري الاتصال بها حالياً بناءً على الـ MAC Address لتفادي الحظر الشامل
+    private final Set<String> activeSyncingMacs = Collections.synchronizedSet(new HashSet<>());
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
+
+    private volatile boolean bleOperationsStarted = false;
 
     @Override
     public IBinder onBind(Intent intent) {
@@ -70,16 +79,22 @@ public class PulseNetService extends Service {
         bleAdvertiser = new BleAdvertiser(this, bluetoothAdapter);
         bleScanner = new BleScanner(bluetoothAdapter);
 
-        // السيرفر هلق بيدعم بروتوكول الملخص/الطلب بدل إرسال كل شي دفعة وحدة
         bleGattServer = new BleGattServer(this, new BleGattServer.DataProvider() {
             @Override
             public String getSummaryJson() {
-                return databaseHelper.getItemsSummaryAsJson();
+                return databaseHelper.getItemsSummaryAsJson(myDeviceId, myDeviceName);
             }
 
             @Override
             public String getItemsForIds(List<String> ids) {
                 return databaseHelper.getItemsByIdsAsJson(ids, myDeviceId, myDeviceName);
+            }
+
+            @Override
+            public void onDeviceRequestReceived(String requesterDeviceId, String requesterDeviceName, String mac) {
+                long now = System.currentTimeMillis();
+                databaseHelper.upsertDevice(requesterDeviceId, mac, requesterDeviceName, 0, now);
+                Log.i(TAG, "سجّلنا الجهاز الطالب من جهتنا: " + requesterDeviceName);
             }
         });
     }
@@ -108,11 +123,17 @@ public class PulseNetService extends Service {
 
     @SuppressLint("MissingPermission")
     private void startBleOperations() {
+        if (bleOperationsStarted) {
+            Log.i(TAG, "البلوتوث شغال أصلاً - ما محتاجين نبلشه من جديد");
+            return;
+        }
+
         if (bluetoothAdapter == null || !bluetoothAdapter.isEnabled()) {
             Log.e(TAG, "البلوتوث مطفي أو مش موجود");
             return;
         }
 
+        bleOperationsStarted = true;
         Log.i(TAG, "عم نبلش السيرفر والبث والاكتشاف");
         bleGattServer.start();
 
@@ -128,12 +149,19 @@ public class PulseNetService extends Service {
             }
         });
 
+        startScanningInternal();
+    }
+
+    private void startScanningInternal() {
+        if (bleScanner == null) return;
+
         bleScanner.startScanning(new BleScanner.ScanResultListener() {
             @Override
             public void onDeviceFound(BluetoothDevice device, int rssi) {
                 String mac = device.getAddress();
 
-                if (isSyncInProgress) return;
+                // لو الجهاز عم نتحادث معه حالياً لا نفتح معه اتصال تاني
+                if (activeSyncingMacs.contains(mac)) return;
 
                 long now = System.currentTimeMillis();
                 Long lastSync = lastSyncTimeByDevice.get(mac);
@@ -153,15 +181,30 @@ public class PulseNetService extends Service {
 
     /** يتصل بجهاز مكتشف عبر بروتوكول الملخص/الطلب، ويسجّل إحصائية التزامن الحقيقية */
     private void connectAndSyncItems(BluetoothDevice device, int rssi) {
-        isSyncInProgress = true;
-        String mac = device.getAddress();
+        final String mac = device.getAddress();
+        activeSyncingMacs.add(mac);
+
         long now = System.currentTimeMillis();
         long syncStartTime = System.currentTimeMillis();
 
-        BleGattClient client = new BleGattClient(this);
+        BleGattClient client = new BleGattClient(this, myDeviceId, myDeviceName);
+
+        // مهلة أمان: 12 ثانية لكل جهاز بشكل مستقل
+        final Runnable timeoutRunnable = () -> {
+            if (activeSyncingMacs.contains(mac)) {
+                Log.e(TAG, "انتهت مهلة الاتصال للجهاز (" + mac + ") - عم نفك القفل يدوياً");
+                client.disconnect();
+                activeSyncingMacs.remove(mac);
+            }
+        };
+        mainHandler.postDelayed(timeoutRunnable, 12_000L);
+
         client.connectAndFetchItems(device, new BleGattClient.ItemsReceivedListener() {
             @Override
             public void onItemsReceived(String json) {
+                mainHandler.removeCallbacks(timeoutRunnable);
+                activeSyncingMacs.remove(mac);
+
                 String senderId = null;
                 String senderName = "جهاز PulseNet";
 
@@ -173,8 +216,6 @@ public class PulseNetService extends Service {
                 }
 
                 if (senderId == null || senderId.isEmpty()) {
-                    // ما في شي ناقصنا فعلياً (رد فاضي بلا هوية) - برضه حدث ناجح، بس بلا استيراد
-                    isSyncInProgress = false;
                     return;
                 }
 
@@ -197,13 +238,12 @@ public class PulseNetService extends Service {
                 if (importedCount > 0) {
                     notificationHelper.showNewItemsNotification(importedCount);
                 }
-
-                isSyncInProgress = false;
             }
 
             @Override
             public void onConnectionFailed() {
-                isSyncInProgress = false;
+                mainHandler.removeCallbacks(timeoutRunnable);
+                activeSyncingMacs.remove(mac);
             }
         });
     }
@@ -212,6 +252,10 @@ public class PulseNetService extends Service {
     public void onDestroy() {
         super.onDestroy();
         Log.i(TAG, "onDestroy");
+        bleOperationsStarted = false;
+        activeSyncingMacs.clear();
+        mainHandler.removeCallbacksAndMessages(null);
+
         if (bleAdvertiser != null) bleAdvertiser.stopAdvertising();
         if (bleScanner != null) bleScanner.stopScanning();
         if (bleGattServer != null) bleGattServer.stop();

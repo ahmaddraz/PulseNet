@@ -8,6 +8,9 @@ import android.bluetooth.BluetoothGattCharacteristic;
 import android.bluetooth.BluetoothGattService;
 import android.bluetooth.BluetoothProfile;
 import android.content.Context;
+import android.os.Build;
+import android.os.Handler;
+import android.os.Looper;
 import android.util.Log;
 
 import com.pulsenet.app.data.DatabaseHelper;
@@ -15,13 +18,6 @@ import com.pulsenet.app.data.DatabaseHelper;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 
-/**
- * "العميل" - بيطبّق بروتوكول "ملخص → مقارنة → طلب الناقص فقط" الكامل:
- * 1) يقرأ الملخص الخفيف (id+version+hash) من الجهاز التاني
- * 2) يقارنه محلياً مع قاعدة بياناتنا (findMissingItemIds)
- * 3) يكتب طلب فيه بس الـ id الناقصة
- * 4) يقرأ الرد الكامل (بالتفاصيل) بس للمطلوب
- */
 public class BleGattClient {
 
     private static final String TAG = "BleGattClient";
@@ -33,19 +29,28 @@ public class BleGattClient {
 
     private final Context context;
     private final DatabaseHelper databaseHelper;
+    private final String myDeviceId;
+    private final String myDeviceName;
     private BluetoothGatt bluetoothGatt;
     private ItemsReceivedListener listener;
 
-    public BleGattClient(Context context) {
+    private volatile boolean isServicesDiscovered = false;
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
+    private Runnable mtuTimeoutRunnable;
+
+    public BleGattClient(Context context, String myDeviceId, String myDeviceName) {
         this.context = context.getApplicationContext();
         this.databaseHelper = new DatabaseHelper(this.context);
+        this.myDeviceId = myDeviceId;
+        this.myDeviceName = myDeviceName;
     }
 
     @SuppressLint("MissingPermission")
     public void connectAndFetchItems(BluetoothDevice device, ItemsReceivedListener listener) {
         this.listener = listener;
+        this.isServicesDiscovered = false;
         Log.i(TAG, "عم نبدأ اتصال بـ " + device.getAddress());
-        bluetoothGatt = device.connectGatt(context, false, gattCallback);
+        bluetoothGatt = device.connectGatt(context, false, gattCallback, BluetoothDevice.TRANSPORT_LE);
     }
 
     private final BluetoothGattCallback gattCallback = new BluetoothGattCallback() {
@@ -54,11 +59,28 @@ public class BleGattClient {
         @SuppressLint("MissingPermission")
         public void onConnectionStateChange(BluetoothGatt gatt, int status, int newState) {
             if (newState == BluetoothProfile.STATE_CONNECTED) {
-                Log.i(TAG, "اتصلنا - عم نطلب حجم رسالة أكبر");
-                boolean mtuRequested = gatt.requestMtu(512);
-                if (!mtuRequested) gatt.discoverServices();
+                Log.i(TAG, "اتصلنا - عم نطلب حجم رسالة أكبر (MTU)");
+
+                // صمام أمان في حال عدم استجابة الجهاز لـ MTU خلال 1.5 ثانية
+                mtuTimeoutRunnable = () -> {
+                    if (!isServicesDiscovered && bluetoothGatt != null) {
+                        Log.w(TAG, "تأخر الـ MTU، جاري اكتشاف الخدمات تلقائياً...");
+                        isServicesDiscovered = true;
+                        gatt.discoverServices();
+                    }
+                };
+                mainHandler.postDelayed(mtuTimeoutRunnable, 1500);
+
+                if (!gatt.requestMtu(512)) {
+                    // إذا فشل طلب الـ MTU فوراً، اكتشف الخدمات مباشرة
+                    mainHandler.removeCallbacks(mtuTimeoutRunnable);
+                    isServicesDiscovered = true;
+                    gatt.discoverServices();
+                }
+
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
-                gatt.close();
+                Log.i(TAG, "انقطع الاتصال بالجهاز");
+                closeGattSilently();
             }
         }
 
@@ -66,7 +88,12 @@ public class BleGattClient {
         @SuppressLint("MissingPermission")
         public void onMtuChanged(BluetoothGatt gatt, int mtu, int status) {
             Log.i(TAG, "onMtuChanged - mtu=" + mtu);
-            gatt.discoverServices();
+            if (mtuTimeoutRunnable != null) mainHandler.removeCallbacks(mtuTimeoutRunnable);
+
+            if (!isServicesDiscovered) {
+                isServicesDiscovered = true;
+                gatt.discoverServices();
+            }
         }
 
         @Override
@@ -94,11 +121,27 @@ public class BleGattClient {
             gatt.readCharacteristic(summaryCharacteristic);
         }
 
+        // --- دعم أجهزة Android 12 وما دون (API < 33) ---
         @Override
+        @Deprecated
+        public void onCharacteristicRead(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic, int status) {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+                byte[] value = characteristic.getValue();
+                processCharacteristicRead(gatt, characteristic, value, status);
+            }
+        }
+
+        // --- دعم أجهزة Android 13 وما فوق (API >= 33) ---
+        @Override
+        public void onCharacteristicRead(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic, byte[] value, int status) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                processCharacteristicRead(gatt, characteristic, value, status);
+            }
+        }
+
         @SuppressLint("MissingPermission")
-        public void onCharacteristicRead(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic,
-                                         byte[] value, int status) {
-            if (status != BluetoothGatt.GATT_SUCCESS) {
+        private void processCharacteristicRead(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic, byte[] value, int status) {
+            if (status != BluetoothGatt.GATT_SUCCESS || value == null) {
                 notifyFailed();
                 return;
             }
@@ -110,14 +153,13 @@ public class BleGattClient {
             } else {
                 Log.i(TAG, "وصلنا الرد الكامل، طوله: " + json.length());
                 if (listener != null) listener.onItemsReceived(json);
-                gatt.disconnect();
+                disconnect();
             }
         }
 
         @Override
         @SuppressLint("MissingPermission")
-        public void onCharacteristicWrite(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic,
-                                          int status) {
+        public void onCharacteristicWrite(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic, int status) {
             if (!BleConstants.REQUEST_CHARACTERISTIC_UUID.equals(characteristic.getUuid())) return;
 
             if (status != BluetoothGatt.GATT_SUCCESS) {
@@ -127,6 +169,11 @@ public class BleGattClient {
             }
 
             BluetoothGattService service = gatt.getService(BleConstants.SERVICE_UUID);
+            if (service == null) {
+                notifyFailed();
+                return;
+            }
+
             BluetoothGattCharacteristic itemsCharacteristic =
                     service.getCharacteristic(BleConstants.ITEMS_CHARACTERISTIC_UUID);
 
@@ -137,29 +184,16 @@ public class BleGattClient {
 
     @SuppressLint("MissingPermission")
     private void handleSummaryReceived(BluetoothGatt gatt, String summaryJson) {
-        String remoteDeviceId = null;
-        String remoteDeviceName = "جهاز PulseNet";
-        try {
-            org.json.JSONObject summaryEnvelope = new org.json.JSONObject(summaryJson);
-            remoteDeviceId = summaryEnvelope.optString("senderDeviceId", null);
-            remoteDeviceName = summaryEnvelope.optString("senderDeviceName", remoteDeviceName);
-        } catch (org.json.JSONException ignored) {
-        }
-
+        Log.i(TAG, "محتوى الملخص الخام: " + summaryJson);
         List<String> missingIds = databaseHelper.findMissingItemIds(summaryJson);
-        Log.i(TAG, "الملخص وصل من " + remoteDeviceName + " - عنا نقص بـ " + missingIds.size() + " معلومة");
+        Log.i(TAG, "الملخص وصل - عنا نقص بـ " + missingIds.size() + " معلومة");
 
+        // لو ما عنا أي نقص، نرسل طلب الهوية للتسجيل وننهي بعد ثانية (مش فوراً) حتى الكتابة توصل فعلياً
         if (missingIds.isEmpty()) {
-            try {
-                org.json.JSONObject emptyEnvelope = new org.json.JSONObject();
-                emptyEnvelope.put("senderDeviceId", remoteDeviceId);
-                emptyEnvelope.put("senderDeviceName", remoteDeviceName);
-                emptyEnvelope.put("items", new org.json.JSONArray());
-                if (listener != null) listener.onItemsReceived(emptyEnvelope.toString());
-            } catch (org.json.JSONException e) {
-                if (listener != null) listener.onItemsReceived("{\"items\":[]}");
-            }
-            gatt.disconnect();
+            Log.i(TAG, "ما عنا نقص - عم نبعت هويتنا بس، ومنستنى قبل ما نقطع");
+            sendRequesterIdentityOnly(gatt);
+            if (listener != null) listener.onItemsReceived("{\"items\":[]}");
+            mainHandler.postDelayed(this::disconnect, 1000);
             return;
         }
 
@@ -168,39 +202,79 @@ public class BleGattClient {
             org.json.JSONArray idsArray = new org.json.JSONArray();
             for (String id : missingIds) idsArray.put(id);
             requestObj.put("requestedIds", idsArray);
+            requestObj.put("requesterDeviceId", myDeviceId);
+            requestObj.put("requesterDeviceName", myDeviceName);
 
             BluetoothGattService service = gatt.getService(BleConstants.SERVICE_UUID);
+            if (service == null) {
+                notifyFailed();
+                return;
+            }
+
             BluetoothGattCharacteristic requestCharacteristic =
                     service.getCharacteristic(BleConstants.REQUEST_CHARACTERISTIC_UUID);
 
             byte[] requestBytes = requestObj.toString().getBytes(StandardCharsets.UTF_8);
 
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
-                gatt.writeCharacteristic(requestCharacteristic, requestBytes,
-                        BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT);
-            } else {
-                requestCharacteristic.setValue(requestBytes);
-                requestCharacteristic.setWriteType(BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT);
-                gatt.writeCharacteristic(requestCharacteristic);
-            }
+            writeCharacteristicData(gatt, requestCharacteristic, requestBytes);
+            Log.i(TAG, "عم نبعت طلبنا (وهويتنا) - عدد الناقص: " + missingIds.size());
 
-            Log.i(TAG, "عم نبعت طلب الناقص...");
         } catch (org.json.JSONException e) {
             Log.e(TAG, "خطأ ببناء الطلب: " + e.getMessage());
             notifyFailed();
         }
     }
 
+    @SuppressLint("MissingPermission")
+    private void sendRequesterIdentityOnly(BluetoothGatt gatt) {
+        try {
+            org.json.JSONObject requestObj = new org.json.JSONObject();
+            requestObj.put("requestedIds", new org.json.JSONArray());
+            requestObj.put("requesterDeviceId", myDeviceId);
+            requestObj.put("requesterDeviceName", myDeviceName);
+
+            BluetoothGattService service = gatt.getService(BleConstants.SERVICE_UUID);
+            if (service != null) {
+                BluetoothGattCharacteristic requestCharacteristic =
+                        service.getCharacteristic(BleConstants.REQUEST_CHARACTERISTIC_UUID);
+                if (requestCharacteristic != null) {
+                    writeCharacteristicData(gatt, requestCharacteristic, requestObj.toString().getBytes(StandardCharsets.UTF_8));
+                }
+            }
+        } catch (Exception ignored) {}
+    }
+
+    @SuppressLint("MissingPermission")
+    private void writeCharacteristicData(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic, byte[] data) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            gatt.writeCharacteristic(characteristic, data, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT);
+        } else {
+            characteristic.setValue(data);
+            characteristic.setWriteType(BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT);
+            gatt.writeCharacteristic(characteristic);
+        }
+    }
+
     private void notifyFailed() {
         if (listener != null) listener.onConnectionFailed();
-        if (bluetoothGatt != null) disconnect();
+        disconnect();
     }
 
     @SuppressLint("MissingPermission")
     public void disconnect() {
         if (bluetoothGatt != null) {
-            bluetoothGatt.disconnect();
-            bluetoothGatt.close();
+            try {
+                bluetoothGatt.disconnect();
+            } catch (Exception ignored) {}
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private void closeGattSilently() {
+        if (bluetoothGatt != null) {
+            try {
+                bluetoothGatt.close();
+            } catch (Exception ignored) {}
             bluetoothGatt = null;
         }
     }

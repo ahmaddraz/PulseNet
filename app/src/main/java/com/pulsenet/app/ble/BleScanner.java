@@ -28,9 +28,9 @@ public class BleScanner {
     private final BluetoothAdapter bluetoothAdapter;
     private final Handler handler = new Handler(Looper.getMainLooper());
     private BluetoothLeScanner bleScanner;
-    private ScanCallback scanCallback;
     private ScanResultListener listener;
-    private boolean isRunning = false;
+    private volatile boolean isRunning = false;
+    private volatile boolean isScanningActive = false;
 
     public BleScanner(BluetoothAdapter bluetoothAdapter) {
         this.bluetoothAdapter = bluetoothAdapter;
@@ -65,33 +65,35 @@ public class BleScanner {
     private void runScanCycle() {
         if (!isRunning) return;
 
+        if (bluetoothAdapter == null || !bluetoothAdapter.isEnabled()) {
+            Log.w(TAG, "توقف الاكتشاف الدوري - البلوتوث غير مفعّل");
+            stopScanning();
+            return;
+        }
+
+        bleScanner = bluetoothAdapter.getBluetoothLeScanner();
+        if (bleScanner == null) return;
+
         List<ScanFilter> filters = new ArrayList<>();
         filters.add(new ScanFilter.Builder()
                 .setServiceUuid(new ParcelUuid(BleConstants.SERVICE_UUID))
                 .build());
 
         ScanSettings settings = new ScanSettings.Builder()
-                .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
+                .setScanMode(ScanSettings.SCAN_MODE_BALANCED) // نمط متوازن لحفظ البطارية ومنع الحظر
                 .build();
 
-        scanCallback = new ScanCallback() {
-            @Override
-            public void onScanResult(int callbackType, ScanResult result) {
-                if (listener != null) {
-                    listener.onDeviceFound(result.getDevice(), result.getRssi());
-                }
-            }
+        try {
+            stopCurrentScan();
+            bleScanner.startScan(filters, settings, internalScanCallback);
+            isScanningActive = true;
+            Log.i(TAG, "بدأت دورة اكتشاف جديدة");
+        } catch (Exception e) {
+            Log.e(TAG, "فشل بدء الاكتشاف: " + e.getMessage());
+            if (listener != null) listener.onScanFailed(ScanCallback.SCAN_FAILED_INTERNAL_ERROR);
+        }
 
-            @Override
-            public void onScanFailed(int errorCode) {
-                Log.e(TAG, "فشل الاكتشاف، كود الخطأ: " + errorCode);
-                if (listener != null) listener.onScanFailed(errorCode);
-            }
-        };
-
-        bleScanner.startScan(filters, settings, scanCallback);
-        Log.i(TAG, "بدأت دورة اكتشاف جديدة");
-
+        // جدولة إيقاف المسح الحالي والبدء بفترة الراحة
         handler.postDelayed(() -> {
             stopCurrentScan();
             if (isRunning) {
@@ -100,13 +102,43 @@ public class BleScanner {
         }, BleConstants.SCAN_PERIOD_MS);
     }
 
+    // مرجع موحد ثابت للـ Callback لمنع تسريب الذاكرة والحظر
+    private final ScanCallback internalScanCallback = new ScanCallback() {
+        @Override
+        public void onScanResult(int callbackType, ScanResult result) {
+            if (listener != null && result != null && result.getDevice() != null) {
+                listener.onDeviceFound(result.getDevice(), result.getRssi());
+            }
+        }
+
+        @Override
+        public void onBatchScanResults(List<ScanResult> results) {
+            if (listener != null && results != null) {
+                for (ScanResult result : results) {
+                    if (result != null && result.getDevice() != null) {
+                        listener.onDeviceFound(result.getDevice(), result.getRssi());
+                    }
+                }
+            }
+        }
+
+        @Override
+        public void onScanFailed(int errorCode) {
+            Log.e(TAG, "فشل الاكتشاف، كود الخطأ: " + errorCode);
+            isScanningActive = false;
+            if (listener != null) listener.onScanFailed(errorCode);
+        }
+    };
+
     @SuppressLint("MissingPermission")
     private void stopCurrentScan() {
-        if (bleScanner != null && scanCallback != null) {
+        if (isScanningActive && bleScanner != null) {
             try {
-                bleScanner.stopScan(scanCallback);
-            } catch (IllegalStateException e) {
+                bleScanner.stopScan(internalScanCallback);
+            } catch (Exception e) {
                 Log.w(TAG, "تعذر إيقاف الاكتشاف: " + e.getMessage());
+            } finally {
+                isScanningActive = false;
             }
         }
     }

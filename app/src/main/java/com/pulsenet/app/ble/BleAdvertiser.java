@@ -22,7 +22,7 @@ public class BleAdvertiser {
     private final BluetoothAdapter bluetoothAdapter;
     private BluetoothLeAdvertiser bleAdvertiser;
     private AdvertiseCallback advertiseCallback;
-    private boolean isAdvertising = false;
+    private volatile boolean isAdvertising = false;
 
     public BleAdvertiser(Context context, BluetoothAdapter bluetoothAdapter) {
         this.bluetoothAdapter = bluetoothAdapter;
@@ -40,6 +40,11 @@ public class BleAdvertiser {
             return;
         }
 
+        // إيقاف أي بث سابق جاري لمنع خطأ ALREADY_STARTED
+        if (isAdvertising) {
+            stopAdvertising();
+        }
+
         bleAdvertiser = bluetoothAdapter.getBluetoothLeAdvertiser();
         if (bleAdvertiser == null) {
             Log.e(TAG, "هذا الجهاز ما بيدعم البث عبر BLE");
@@ -48,8 +53,8 @@ public class BleAdvertiser {
         }
 
         AdvertiseSettings settings = new AdvertiseSettings.Builder()
-                .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_LOW_LATENCY)
-                .setTxPowerLevel(AdvertiseSettings.ADVERTISE_TX_POWER_HIGH)
+                .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_BALANCED) // متوازن لحفظ الطاقة والعمل المستمر
+                .setTxPowerLevel(AdvertiseSettings.ADVERTISE_TX_POWER_MEDIUM)
                 .setConnectable(true)
                 .setTimeout(0)
                 .build();
@@ -75,14 +80,26 @@ public class BleAdvertiser {
             }
         };
 
-        bleAdvertiser.startAdvertising(settings, data, advertiseCallback);
+        try {
+            bleAdvertiser.startAdvertising(settings, data, advertiseCallback);
+        } catch (Exception e) {
+            Log.e(TAG, "خطأ غير متوقع عند بدء البث: " + e.getMessage());
+            isAdvertising = false;
+            if (listener != null) listener.onAdvertiseFailed(AdvertiseCallback.ADVERTISE_FAILED_INTERNAL_ERROR);
+        }
     }
 
     @SuppressLint("MissingPermission")
     public void stopAdvertising() {
-        if (bleAdvertiser != null && advertiseCallback != null) {
-            bleAdvertiser.stopAdvertising(advertiseCallback);
+        if (bleAdvertiser != null && advertiseCallback != null && isAdvertising) {
+            try {
+                bleAdvertiser.stopAdvertising(advertiseCallback);
+                Log.i(TAG, "تم إيقاف البث بنجاح");
+            } catch (Exception e) {
+                Log.w(TAG, "فشل إيقاف البث (قد يكون البلوتوث مطفأ): " + e.getMessage());
+            }
         }
         isAdvertising = false;
+        advertiseCallback = null;
     }
 }

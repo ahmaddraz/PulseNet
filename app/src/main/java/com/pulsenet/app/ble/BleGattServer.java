@@ -8,36 +8,41 @@ import android.bluetooth.BluetoothGattServer;
 import android.bluetooth.BluetoothGattServerCallback;
 import android.bluetooth.BluetoothGattService;
 import android.bluetooth.BluetoothManager;
+import android.bluetooth.BluetoothProfile;
 import android.content.Context;
 import android.util.Log;
 
+import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
-/**
- * "السيرفر" المحلي - هلق بيدعم بروتوكول "ملخص → طلب → رد" الكامل:
- * 1) يعرض ملخص خفيف (id+version+hash) عبر SUMMARY_CHARACTERISTIC
- * 2) يستقبل طلب "بدي هاي الـ id المحددة" عبر REQUEST_CHARACTERISTIC (كتابة)
- * 3) يحضّر ويرجع التفاصيل الكاملة بس للمطلوب عبر ITEMS_CHARACTERISTIC
- */
 public class BleGattServer {
 
     private static final String TAG = "BleGattServer";
 
     public interface DataProvider {
-        /** يرجع ملخص خفيف (id+version+hash) لكل معلوماتنا */
         String getSummaryJson();
-
-        /** يرجع حزمة كاملة (بالتفاصيل) بس للمعلومات يلي ضمن اللائحة المطلوبة */
         String getItemsForIds(List<String> ids);
+        void onDeviceRequestReceived(String requesterDeviceId, String requesterDeviceName, String mac);
     }
 
     private final Context context;
     private final DataProvider dataProvider;
     private BluetoothGattServer gattServer;
 
-    // آخر رد جهّزناه بعد طلب "الناقص فقط" - بيُقرأ لاحقاً عبر ITEMS_CHARACTERISTIC
-    private volatile String pendingItemsResponse = "{}";
+    // تتبع الأجهزة المتصلة حالياً لمنع تكرار سجلات الفصل
+    private final Map<String, BluetoothDevice> connectedDevicesMap = new ConcurrentHashMap<>();
+
+    // تخزين الرد المجهز لكل جهاز
+    private final Map<String, String> devicePendingResponses = new ConcurrentHashMap<>();
+
+    // تتبع الـ MTU المفاوَض عليه لكل جهاز متصل (الافتراضي في BLE هو 23 بايت -> payload 20)
+    private final Map<String, Integer> deviceMtuMap = new ConcurrentHashMap<>();
+
+    // تجميع أجزاء الطلبات المكتوبة ذات الحجم الكبير لكل جهاز
+    private final Map<String, ByteArrayOutputStream> writeBufferMap = new ConcurrentHashMap<>();
 
     public BleGattServer(Context context, DataProvider dataProvider) {
         this.context = context.getApplicationContext();
@@ -80,10 +85,53 @@ public class BleGattServer {
         service.addCharacteristic(requestCharacteristic);
 
         gattServer.addService(service);
-        Log.i(TAG, "GATT Server بدأ (ملخص + طلب + رد)");
+        Log.i(TAG, "GATT Server بدأ بنجاح");
     }
 
     private final BluetoothGattServerCallback serverCallback = new BluetoothGattServerCallback() {
+
+        @Override
+        public void onMtuChanged(BluetoothDevice device, int mtu) {
+            super.onMtuChanged(device, mtu);
+            Log.i(TAG, "تم تحديث MTU الـ Server للجهاز (" + device.getAddress() + ") إلى: " + mtu);
+            deviceMtuMap.put(device.getAddress(), mtu);
+        }
+
+        @Override
+        @SuppressLint("MissingPermission")
+        public void onConnectionStateChange(BluetoothDevice device, int status, int newState) {
+            super.onConnectionStateChange(device, status, newState);
+            if (device == null) return;
+
+            String mac = device.getAddress();
+
+            if (newState == BluetoothProfile.STATE_CONNECTED) {
+                // تسجيل الجهاز في الخريطة عند الاتصال
+                connectedDevicesMap.put(mac, device);
+                Log.i(TAG, "جهاز اتصل بالـ Server: " + mac);
+                deviceMtuMap.put(mac, 23); // القيمة الافتراضية للمعايير القياسية
+
+            } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
+                // محاولة حذف الجهاز من الخريطة؛ ستتم العملية وتُرجع الكائن مرة واحدة فقط
+                BluetoothDevice removedDevice = connectedDevicesMap.remove(mac);
+
+                if (removedDevice != null) {
+                    Log.i(TAG, "جهاز فصل عن الـ Server: " + mac);
+
+                    // تنظيف الذاكرة وتحرير الموارد فور الانقطاع
+                    devicePendingResponses.remove(mac);
+                    deviceMtuMap.remove(mac);
+                    writeBufferMap.remove(mac);
+
+                    if (gattServer != null) {
+                        try {
+                            gattServer.cancelConnection(device);
+                        } catch (Exception ignored) {}
+                    }
+                }
+                // أي إشعار فصل مكرر بعد ذلك سيتم تجاهله تماماً دون طباعة أخطاء
+            }
+        }
 
         @Override
         @SuppressLint("MissingPermission")
@@ -93,20 +141,27 @@ public class BleGattServer {
             if (BleConstants.SUMMARY_CHARACTERISTIC_UUID.equals(characteristic.getUuid())) {
                 json = dataProvider.getSummaryJson();
             } else {
-                json = pendingItemsResponse; // آخر رد جهّزناه بعد طلب سابق
+                json = devicePendingResponses.getOrDefault(device.getAddress(), "{}");
             }
 
+            if (json == null) json = "{}";
+
             byte[] fullData = json.getBytes(StandardCharsets.UTF_8);
+            int mtu = deviceMtuMap.getOrDefault(device.getAddress(), 512);
+            int maxChunkSize = Math.max(20, mtu - 3); // أقصى حجم حمولة مسموح في BLE Packet
+
             byte[] chunk;
-            if (offset > fullData.length) {
+            if (offset >= fullData.length) {
                 chunk = new byte[0];
             } else {
-                int length = Math.min(fullData.length - offset, 512);
+                int length = Math.min(fullData.length - offset, maxChunkSize);
                 chunk = new byte[length];
                 System.arraycopy(fullData, offset, chunk, 0, length);
             }
 
-            gattServer.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, offset, chunk);
+            if (gattServer != null) {
+                gattServer.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, offset, chunk);
+            }
         }
 
         @Override
@@ -115,36 +170,91 @@ public class BleGattServer {
                                                  BluetoothGattCharacteristic characteristic,
                                                  boolean preparedWrite, boolean responseNeeded,
                                                  int offset, byte[] value) {
-            if (BleConstants.REQUEST_CHARACTERISTIC_UUID.equals(characteristic.getUuid())) {
+            String mac = device.getAddress();
+
+            if (BleConstants.REQUEST_CHARACTERISTIC_UUID.equals(characteristic.getUuid()) && value != null) {
                 try {
-                    String requestJson = new String(value, StandardCharsets.UTF_8);
-                    org.json.JSONObject obj = new org.json.JSONObject(requestJson);
-                    org.json.JSONArray idsArray = obj.getJSONArray("requestedIds");
-
-                    java.util.List<String> ids = new java.util.ArrayList<>();
-                    for (int i = 0; i < idsArray.length(); i++) {
-                        ids.add(idsArray.getString(i));
+                    ByteArrayOutputStream buffer = writeBufferMap.get(mac);
+                    if (buffer == null || offset == 0) {
+                        buffer = new ByteArrayOutputStream();
+                        writeBufferMap.put(mac, buffer);
                     }
+                    buffer.write(value);
 
-                    // نجهّز الرد فوراً - رح يُقرأ بالخطوة الجاية عبر ITEMS_CHARACTERISTIC
-                    pendingItemsResponse = dataProvider.getItemsForIds(ids);
-                    Log.i(TAG, "استقبلنا طلب لـ " + ids.size() + " معلومة، وجهزنا الرد");
-                } catch (org.json.JSONException e) {
-                    Log.e(TAG, "خطأ بقراءة الطلب: " + e.getMessage());
-                    pendingItemsResponse = "{}";
+                    // إذا لم تكن كتابة مُجهزة على أجزاء، أو اكتمل الاستلام، نبدأ بالمعالجة
+                    if (!preparedWrite) {
+                        processCompletedRequest(mac, buffer.toByteArray());
+                        writeBufferMap.remove(mac);
+                    }
+                } catch (Exception e) {
+                    Log.e(TAG, "خطأ أثناء معالجة أجزاء الكتابة: " + e.getMessage());
                 }
             }
 
-            if (responseNeeded) {
+            if (responseNeeded && gattServer != null) {
                 gattServer.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, offset, null);
+            }
+        }
+
+        @Override
+        @SuppressLint("MissingPermission")
+        public void onExecuteWrite(BluetoothDevice device, int requestId, boolean execute) {
+            super.onExecuteWrite(device, requestId, execute);
+            String mac = device.getAddress();
+
+            if (execute) {
+                ByteArrayOutputStream buffer = writeBufferMap.remove(mac);
+                if (buffer != null) {
+                    processCompletedRequest(mac, buffer.toByteArray());
+                }
+            } else {
+                writeBufferMap.remove(mac);
+            }
+
+            if (gattServer != null) {
+                gattServer.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, 0, null);
             }
         }
     };
 
+    private void processCompletedRequest(String macAddress, byte[] data) {
+        try {
+            String requestJson = new String(data, StandardCharsets.UTF_8);
+            org.json.JSONObject obj = new org.json.JSONObject(requestJson);
+            org.json.JSONArray idsArray = obj.getJSONArray("requestedIds");
+
+            List<String> ids = new java.util.ArrayList<>();
+            for (int i = 0; i < idsArray.length(); i++) {
+                ids.add(idsArray.getString(i));
+            }
+
+            // تجهيز الرد المخصص بناءً على الـ IDs المطلوبة
+            String itemsJson = dataProvider.getItemsForIds(ids);
+            devicePendingResponses.put(macAddress, itemsJson);
+            Log.i(TAG, "تم تجهيز الرد لـ " + ids.size() + " معلومة للجهاز: " + macAddress);
+
+            String requesterDeviceId = obj.optString("requesterDeviceId", null);
+            String requesterDeviceName = obj.optString("requesterDeviceName", "جهاز PulseNet");
+            if (requesterDeviceId != null && !requesterDeviceId.isEmpty()) {
+                dataProvider.onDeviceRequestReceived(requesterDeviceId, requesterDeviceName, macAddress);
+            }
+        } catch (org.json.JSONException e) {
+            Log.e(TAG, "خطأ بقراءة الطلب المكتمل: " + e.getMessage());
+            devicePendingResponses.put(macAddress, "{}");
+        }
+    }
+
     @SuppressLint("MissingPermission")
     public void stop() {
         if (gattServer != null) {
-            gattServer.close();
+            try {
+                gattServer.close();
+            } catch (Exception ignored) {}
+            gattServer = null;
         }
+        connectedDevicesMap.clear();
+        devicePendingResponses.clear();
+        deviceMtuMap.clear();
+        writeBufferMap.clear();
     }
 }

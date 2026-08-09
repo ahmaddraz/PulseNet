@@ -1,20 +1,22 @@
 package com.pulsenet.app.data;
 
+import org.json.JSONException;
+import org.json.JSONObject;
+
 /**
  * يمثل "معلومة" واحدة بالتطبيق، مطابق لمخطط ER الأكاديمي المعتمد.
- * التصنيف (type) يُخزَّن بالإنجليزي (alert/service/aid/location) متل المخطط،
- * بس يُعرض ويُدخَل بالعربي بالواجهة عبر دوال الترجمة تحت.
  */
 public class Item {
 
-    // ---------- ثوابت أنواع المعلومة (type) - مطابقة للمخطط بالحرف ----------
+    // ---------- ثوابت أنواع المعلومة (type) ----------
     public static final String TYPE_ALERT = "alert";       // طوارئ
     public static final String TYPE_SERVICE = "service";   // خدمة
     public static final String TYPE_AID = "aid";            // مساعدة
     public static final String TYPE_LOCATION = "location"; // موقع
 
-    /** يترجم التصنيف العربي (يلي المستخدم بيختاره بالواجهة) لقيمة إنجليزية للتخزين */
+    /** يترجم التصنيف العربي لقيمة إنجليزية للتخزين */
     public static String arabicCategoryToType(String arabicCategory) {
+        if (arabicCategory == null) return TYPE_ALERT;
         switch (arabicCategory) {
             case "طوارئ": return TYPE_ALERT;
             case "خدمة": return TYPE_SERVICE;
@@ -36,31 +38,31 @@ public class Item {
         }
     }
 
-    // ---------- الحقول (مطابقة لمخطط ER) ----------
-    private String id;                 // UUID - هو نفسه المعرّف الفريد (دمجنا id و uuid القديمين بحقل وحد)
+    // ---------- الحقول ----------
+    private String id;
     private String title;
-    private String body;               // كان اسمها details قبل
-    private String type;               // alert / service / aid / location
-    private String area;               // كانت اسمها region قبل
+    private String body;
+    private String type;
+    private String area;
     private String priority;
-    private String payloadHash;        // بصمة للتحقق من التكرار
+    private String payloadHash;
     private int version;
-    private String originDeviceId;     // الجهاز يلي أنشأ المعلومة أصلاً (FK, nullable)
-    private String originAdminId;      // فاضي لهلق - لحد ما تبنى لوحة التحكم (FK, nullable)
+    private String originDeviceId;
+    private String originAdminId;
     private boolean isAdminBroadcast;
     private long createdAt;
     private long updatedAt;
-    private Long expiresAt;            // TTL - null يعني بدون انتهاء صلاحية
+    private Long expiresAt;
     private int hopCount;
     private int maxHops;
-    private String syncStatus;         // "pending" أو "synced" (لمزامنة الأدمن لاحقاً)
+    private String syncStatus;
     private boolean isRead;
     private boolean isHiddenLocally;
 
     public Item() {
     }
 
-    /** Constructor مبسّط لإنشاء معلومة جديدة محلياً (المستخدم نفسه) */
+    /** Constructor مبسّط لإنشاء معلومة جديدة محلياً */
     public Item(String id, String title, String body, String type,
                 String area, String priority, String originDeviceId, long createdAt) {
         this.id = id;
@@ -76,15 +78,15 @@ public class Item {
         this.isAdminBroadcast = false;
         this.createdAt = createdAt;
         this.updatedAt = createdAt;
-        this.expiresAt = createdAt + (72L * 60 * 60 * 1000); // افتراضياً: تنتهي صلاحيتها بعد 72 ساعة
+        this.expiresAt = createdAt + (72L * 60 * 60 * 1000); // 72 ساعة
         this.hopCount = 0;
-        this.maxHops = 5; // افتراضياً: توقف عن الانتشار بعد 5 قفزات
+        this.maxHops = 5;
         this.syncStatus = "pending";
         this.isRead = false;
         this.isHiddenLocally = false;
     }
 
-    /** يحسب بصمة بسيطة (Hash) من محتوى المعلومة، تستخدم للتحقق من التكرار */
+    /** يحسب بصمة بسيطة (Hash) من محتوى المعلومة */
     public static String computeHash(String title, String body, String type, String area) {
         String combined = (title == null ? "" : title)
                 + "|" + (body == null ? "" : body)
@@ -152,18 +154,18 @@ public class Item {
     public boolean isHiddenLocally() { return isHiddenLocally; }
     public void setHiddenLocally(boolean hiddenLocally) { isHiddenLocally = hiddenLocally; }
 
-    /** يحوّل هاي المعلومة لصيغة JSON، جاهزة نبعتها عبر البلوتوث لجهاز تاني */
-    public org.json.JSONObject toJson() throws org.json.JSONException {
-        org.json.JSONObject obj = new org.json.JSONObject();
-        obj.put("id", id);
-        obj.put("title", title);
-        obj.put("body", body == null ? "" : body);
-        obj.put("type", type);
-        obj.put("area", area == null ? "" : area);
-        obj.put("priority", priority == null ? "" : priority);
-        obj.put("payloadHash", payloadHash);
+    /** تحويل آمن لمنع الـ NullPointerExceptions عند إنشاء الـ JSON */
+    public JSONObject toJson() throws JSONException {
+        JSONObject obj = new JSONObject();
+        obj.put("id", id != null ? id : "");
+        obj.put("title", title != null ? title : "");
+        obj.put("body", body != null ? body : "");
+        obj.put("type", type != null ? type : TYPE_ALERT);
+        obj.put("area", area != null ? area : "");
+        obj.put("priority", priority != null ? priority : "");
+        obj.put("payloadHash", payloadHash != null ? payloadHash : "");
         obj.put("version", version);
-        obj.put("originDeviceId", originDeviceId == null ? "" : originDeviceId);
+        obj.put("originDeviceId", originDeviceId != null ? originDeviceId : "");
         obj.put("isAdminBroadcast", isAdminBroadcast);
         obj.put("createdAt", createdAt);
         obj.put("updatedAt", updatedAt);
@@ -171,5 +173,40 @@ public class Item {
         obj.put("hopCount", hopCount);
         obj.put("maxHops", maxHops);
         return obj;
+    }
+
+    /** تحويل آمن من JSON إلى كائن Item */
+    public static Item fromJson(JSONObject obj, String defaultSenderId) throws JSONException {
+        Item item = new Item();
+        item.setId(obj.getString("id"));
+        item.setTitle(obj.optString("title", "بدون عنوان"));
+        item.setBody(obj.optString("body", ""));
+        item.setType(obj.optString("type", TYPE_ALERT));
+        item.setArea(obj.optString("area", ""));
+        item.setPriority(obj.optString("priority", "عادي"));
+        item.setPayloadHash(obj.optString("payloadHash", ""));
+        item.setVersion(obj.optInt("version", 1));
+
+        String origin = obj.optString("originDeviceId", "");
+        item.setOriginDeviceId(origin.isEmpty() ? defaultSenderId : origin);
+
+        item.setAdminBroadcast(obj.optBoolean("isAdminBroadcast", false));
+
+        long now = System.currentTimeMillis();
+        item.setCreatedAt(obj.optLong("createdAt", now));
+        item.setUpdatedAt(obj.optLong("updatedAt", now));
+
+        long expires = obj.optLong("expiresAt", -1);
+        item.setExpiresAt(expires == -1 ? null : expires);
+
+        int hops = obj.optInt("hopCount", 0);
+        item.setHopCount(hops + 1); // زيادة القفزة فور الاستلام
+        item.setMaxHops(obj.optInt("maxHops", 5));
+
+        item.setSyncStatus("pending");
+        item.setRead(false);
+        item.setHiddenLocally(false);
+
+        return item;
     }
 }

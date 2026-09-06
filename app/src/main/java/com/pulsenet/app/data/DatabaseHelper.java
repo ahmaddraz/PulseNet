@@ -6,6 +6,8 @@ import android.database.Cursor;
 import android.database.sqlite.SQLiteDatabase;
 import android.database.sqlite.SQLiteOpenHelper;
 
+import com.pulsenet.app.ble.BleConstants;
+
 import java.util.ArrayList;
 import java.util.List;
 
@@ -196,69 +198,76 @@ public class DatabaseHelper extends SQLiteOpenHelper {
         db.update("items", values, "id = ?", new String[]{id});
     }
 
-    public List<Item> getRecentReceivedItems(String myDeviceId, int limit) {
-        List<Item> items = new ArrayList<>();
-        SQLiteDatabase db = getReadableDatabase();
+    // ================= بروتوكول الملخص/المقارنة/الطلب (بنظام صفحات) =================
+    //
+    // مهم: بروتوكول BLE بيحدد حد أقصى 512 بايت لأي رسالة وحدة. لو حاولنا نبني
+    // ملخص كامل لكل معلوماتنا دفعة وحدة (زي ما كان بالنسخة القديمة)، بمجرد ما
+    // يتراكم عدد المعلومات، الملخص كان رح يتجاوز الحد المسموح ويوصل مقطوع/تالف
+    // للجهاز التاني بصمت. الحل: نبني الملخص على شكل "صفحات" صغيرة، ونقيس
+    // حجمها الفعلي بالبايت (UTF-8) قبل ما نرجعها، بدل ما نفترض عدد ثابت
+    // للمدخلات بكل صفحة (لأنه أسماء الأجهزة والـ hash ممكن يختلف طولهم).
 
-        Cursor cursor = db.query("items", null,
-                "origin_device_id IS NOT NULL AND origin_device_id != ?",
-                new String[]{myDeviceId == null ? "" : myDeviceId},
-                null, null, "created_at DESC", String.valueOf(limit));
+    /**
+     * يبني صفحة وحدة من "ملخص" معلوماتنا (id + version + hash فقط لكل معلومة)
+     * تبلش من ترتيب رقم cursor، وبتوقف تلقائياً قبل ما تتجاوز الحجم الآمن
+     * لرسالة BLE وحدة. الجهاز الطالب بيكرر الطلب بـ cursor الجديد (nextCursor)
+     * لحد ما توصل القيمة -1 (يعني خلصنا كل المعلومات).
+     */
+    public String getItemsSummaryPageAsJson(int cursor, String senderDeviceId, String senderDeviceName) {
+        List<Item> all = getAllItems();
+        org.json.JSONArray entries = new org.json.JSONArray();
+        int i = cursor;
 
-        while (cursor.moveToNext()) {
-            items.add(cursorToItem(cursor));
-        }
-        cursor.close();
-        return items;
-    }
-
-    // ================= بروتوكول الملخص/المقارنة/الطلب =================
-
-    /** يبني "ملخص" خفيف لكل معلوماتنا: id + version + hash فقط (بدون التفاصيل الكاملة) */
-    public String getItemsSummaryAsJson(String senderDeviceId, String senderDeviceName) {
         try {
-            org.json.JSONArray summaryArray = new org.json.JSONArray();
-            for (Item item : getAllItems()) {
+            while (i < all.size()) {
+                Item item = all.get(i);
                 org.json.JSONObject entry = new org.json.JSONObject();
                 entry.put("id", item.getId());
                 entry.put("version", item.getVersion());
                 entry.put("hash", item.getPayloadHash());
-                summaryArray.put(entry);
+
+                org.json.JSONArray candidate = new org.json.JSONArray();
+                for (int j = 0; j < entries.length(); j++) candidate.put(entries.get(j));
+                candidate.put(entry);
+
+                String candidateJson = buildSummaryEnvelope(candidate, i + 1, senderDeviceId, senderDeviceName);
+                if (utf8ByteLength(candidateJson) > BleConstants.SAFE_RESPONSE_BYTES && entries.length() > 0) {
+                    // إضافة هاي المعلومة رح تخلي الصفحة أكبر من اللازم - نوقف هون ونكملها بالصفحة الجاية
+                    break;
+                }
+                entries.put(entry);
+                i++;
             }
+        } catch (org.json.JSONException e) {
+            android.util.Log.e("DatabaseHelper", "خطأ ببناء صفحة الملخص: " + e.getMessage());
+        }
+
+        int nextCursor = i < all.size() ? i : -1;
+        return buildSummaryEnvelope(entries, nextCursor, senderDeviceId, senderDeviceName);
+    }
+
+    private String buildSummaryEnvelope(org.json.JSONArray entries, int nextCursor,
+                                         String senderDeviceId, String senderDeviceName) {
+        try {
             org.json.JSONObject envelope = new org.json.JSONObject();
             envelope.put("senderDeviceId", senderDeviceId);
             envelope.put("senderDeviceName", senderDeviceName);
-            envelope.put("summary", summaryArray);
+            envelope.put("entries", entries);
+            envelope.put("nextCursor", nextCursor);
             return envelope.toString();
         } catch (org.json.JSONException e) {
-            return "{\"summary\":[]}";
+            return "{\"entries\":[],\"nextCursor\":-1}";
         }
     }
 
-    /**
-     * يقارن ملخص وصلنا من جهاز تاني مع معلوماتنا المحلية، ويرجع لائحة الـ id
-     * يلي فعلياً ناقصاها عندنا (أو عندنا نسخة أقدم منها - version أقل)
-     */
-    public List<String> findMissingItemIds(String summaryJson) {
-        List<String> missingIds = new ArrayList<>();
-        try {
-            org.json.JSONObject envelope = new org.json.JSONObject(summaryJson);
-            org.json.JSONArray summaryArray = envelope.getJSONArray("summary");
+    private static int utf8ByteLength(String s) {
+        return s.getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
+    }
 
-            for (int i = 0; i < summaryArray.length(); i++) {
-                org.json.JSONObject entry = summaryArray.getJSONObject(i);
-                String id = entry.getString("id");
-                int remoteVersion = entry.optInt("version", 1);
-
-                Item local = getItemById(id);
-                if (local == null || local.getVersion() < remoteVersion) {
-                    missingIds.add(id); // ما عنا هاي المعلومة أصلاً، أو عنا نسخة أقدم منها
-                }
-            }
-        } catch (org.json.JSONException e) {
-            android.util.Log.e("DatabaseHelper", "خطأ بقراءة الملخص: " + e.getMessage());
-        }
-        return missingIds;
+    /** يتحقق هل معلومة معينة (حسب id ورقم النسخة عند الطرف التاني) ناقصة عنا أو نسخة أقدم */
+    public boolean isMissingOrStale(String id, int remoteVersion) {
+        Item local = getItemById(id);
+        return local == null || local.getVersion() < remoteVersion;
     }
 
     /** يبني حزمة كاملة (بالتفاصيل) بس للمعلومات يلي أرقام هوياتها موجودة باللائحة المطلوبة */
@@ -281,28 +290,10 @@ public class DatabaseHelper extends SQLiteOpenHelper {
         }
     }
 
-    // ================= تبادل المعلومات عبر البلوتوث (الطريقة القديمة - بترسل كل شي، محتفظين فيها احتياط) =================
+    // ================= استيراد المعلومات المستلمة عبر البلوتوث =================
 
-    public String getAllItemsAsJson(String senderDeviceId, String senderDeviceName) {
-        try {
-            org.json.JSONArray itemsArray = new org.json.JSONArray();
-            for (Item item : getAllItems()) {
-                if (item.getHopCount() < item.getMaxHops()) {
-                    itemsArray.put(item.toJson());
-                }
-            }
-            org.json.JSONObject envelope = new org.json.JSONObject();
-            envelope.put("senderDeviceId", senderDeviceId);
-            envelope.put("senderDeviceName", senderDeviceName);
-            envelope.put("items", itemsArray);
-            return envelope.toString();
-        } catch (org.json.JSONException e) {
-            return "{}";
-        }
-    }
-
-    /** يستورد معلومات وصلت من جهاز تاني (حزمة كاملة)، ويرجع [عدد الجديد, عدد المكرر] */
-    public int[] importItemsFromJson(String json, String immediateSenderDeviceId) {
+    /** يستورد حزمة معلومات وصلت من جهاز تاني (رداً على طلب "الناقص فقط")، ويرجع [عدد الجديد, عدد المكرر] */
+    public int[] importReceivedItems(String json, String immediateSenderDeviceId) {
         int importedCount = 0;
         int duplicateCount = 0;
         try {
@@ -366,11 +357,6 @@ public class DatabaseHelper extends SQLiteOpenHelper {
         received.setRead(false);
         received.setHiddenLocally(false);
         return received;
-    }
-
-    /** يستورد حزمة معلومات وصلت رداً على طلب "الناقص فقط" - نفس منطق الاستيراد العادي */
-    public int[] importRequestedItemsFromJson(String json, String immediateSenderDeviceId) {
-        return importItemsFromJson(json, immediateSenderDeviceId);
     }
 
     // ================= عمليات جدول devices =================

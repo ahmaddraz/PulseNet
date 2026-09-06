@@ -18,12 +18,34 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
+/**
+ * دور "الخادم" (Peripheral) بشبكة PulseNet - كل جهاز عم يشغّل هاد الكلاس
+ * بنفس وقت ما هو "عميل" (Client) لأجهزة تانية عبر BleGattClient.
+ *
+ * بروتوكول التبادل (بنظام صفحات - Pagination):
+ *   1. الجهاز الطالب (Client) يكتب رسالة تحكم صغيرة على خاصية "الطلب"
+ *      (REQUEST_CHARACTERISTIC) فيها حقل "action":
+ *        - "summary_page": بده صفحة من ملخص معلوماتنا تبلش من "cursor".
+ *        - "items_page": بده الحزمة الكاملة لعدد صغير (وحدة غالباً) من الـ IDs.
+ *        - "identity_only": بس بده يسجّل هويته، ما في عنده نقص.
+ *   2. منجهّز الرد المناسب ونخزّنه بـ devicePendingResponses.
+ *   3. الجهاز الطالب بعدين يقرأ خاصية "الملخص" أو "المعلومات" (حسب شو طلب)
+ *      وبيوصله الرد المجهّز.
+ *   4. بيكرر الدورة (صفحة ملخص جديدة، أو معلومة جديدة) لحد ما يخلص.
+ *
+ * ليش صفحات صغيرة بدل رد واحد كبير؟ لأنه بروتوكول BLE (ATT) بيمنع أي رسالة
+ * وحدة توصل لأكتر من 512 بايت - أي محاولة نتجاوزها بترجع بيانات مقطوعة
+ * بصمت. بتقسيم الرد لصفحات صغيرة (وقياس الحجم فعلياً بالبايت قبل الإرسال،
+ * راجع DatabaseHelper.getItemsSummaryPageAsJson و Item.toJson) منضمن إنه
+ * ولا رسالة توصل تتجاوز هالحد، بغض النظر كم عدد المعلومات أو طول نصوصها.
+ */
 public class BleGattServer {
 
     private static final String TAG = "BleGattServer";
 
     public interface DataProvider {
-        String getSummaryJson();
+        /** صفحة وحدة من الملخص الخفيف تبلش من cursor (راجع DatabaseHelper.getItemsSummaryPageAsJson) */
+        String getSummaryPageJson(int cursor);
         String getItemsForIds(List<String> ids);
         void onDeviceRequestReceived(String requesterDeviceId, String requesterDeviceName, String mac);
     }
@@ -137,13 +159,11 @@ public class BleGattServer {
         @SuppressLint("MissingPermission")
         public void onCharacteristicReadRequest(BluetoothDevice device, int requestId, int offset,
                                                 BluetoothGattCharacteristic characteristic) {
-            String json;
-            if (BleConstants.SUMMARY_CHARACTERISTIC_UUID.equals(characteristic.getUuid())) {
-                json = dataProvider.getSummaryJson();
-            } else {
-                json = devicePendingResponses.getOrDefault(device.getAddress(), "{}");
-            }
-
+            // صرنا نتبادل البيانات صفحة-صفحة: سواء كانت القراءة لخاصية "الملخص"
+            // أو خاصية "المعلومات"، الاثنين بيرجعوا آخر رد جهّزناه رداً على آخر
+            // طلب (Request) وصل عبر processCompletedRequest - راجع تعليق البروتوكول
+            // بأول الملف لتفاصيل ليش انتقلنا لنظام الصفحات.
+            String json = devicePendingResponses.getOrDefault(device.getAddress(), "{}");
             if (json == null) json = "{}";
 
             byte[] fullData = json.getBytes(StandardCharsets.UTF_8);
@@ -217,27 +237,49 @@ public class BleGattServer {
         }
     };
 
+    /**
+     * كل رسالة توصلنا عبر خاصية "الطلب" فيها حقل "action" بيحدد شو نوع الرد
+     * المطلوب تجهيزه: صفحة ملخص جديدة، أو حزمة معلومات كاملة لعدد صغير من
+     * الـ IDs، أو مجرد تسجيل هوية بدون أي رد فعلي (لما ما يكون عند الطرف
+     * الطالب أي نقص). هاد التقسيم لصفحات صغيرة هو يلي بيضمن ما نتجاوز الحد
+     * الأقصى لحجم رسالة BLE وحدة (512 بايت) - راجع تعليق البروتوكول بأعلى الملف.
+     */
     private void processCompletedRequest(String macAddress, byte[] data) {
         try {
             String requestJson = new String(data, StandardCharsets.UTF_8);
             org.json.JSONObject obj = new org.json.JSONObject(requestJson);
-            org.json.JSONArray idsArray = obj.getJSONArray("requestedIds");
-
-            List<String> ids = new java.util.ArrayList<>();
-            for (int i = 0; i < idsArray.length(); i++) {
-                ids.add(idsArray.getString(i));
-            }
-
-            // تجهيز الرد المخصص بناءً على الـ IDs المطلوبة
-            String itemsJson = dataProvider.getItemsForIds(ids);
-            devicePendingResponses.put(macAddress, itemsJson);
-            Log.i(TAG, "تم تجهيز الرد لـ " + ids.size() + " معلومة للجهاز: " + macAddress);
+            String action = obj.optString("action", "items_page"); // توافق مع أي رسالة قديمة بلا action
 
             String requesterDeviceId = obj.optString("requesterDeviceId", null);
             String requesterDeviceName = obj.optString("requesterDeviceName", "جهاز PulseNet");
             if (requesterDeviceId != null && !requesterDeviceId.isEmpty()) {
                 dataProvider.onDeviceRequestReceived(requesterDeviceId, requesterDeviceName, macAddress);
             }
+
+            String responseJson;
+            switch (action) {
+                case "summary_page": {
+                    int cursor = obj.optInt("cursor", 0);
+                    responseJson = dataProvider.getSummaryPageJson(cursor);
+                    break;
+                }
+                case "items_page": {
+                    org.json.JSONArray idsArray = obj.optJSONArray("requestedIds");
+                    List<String> ids = new java.util.ArrayList<>();
+                    if (idsArray != null) {
+                        for (int i = 0; i < idsArray.length(); i++) {
+                            ids.add(idsArray.getString(i));
+                        }
+                    }
+                    responseJson = dataProvider.getItemsForIds(ids);
+                    break;
+                }
+                default: // "identity_only" أو أي قيمة غير متوقعة - بس تسجيل هوية بدون رد فعلي
+                    responseJson = "{\"items\":[]}";
+            }
+
+            devicePendingResponses.put(macAddress, responseJson);
+            Log.i(TAG, "جهّزنا رد (" + action + ") للجهاز: " + macAddress);
         } catch (org.json.JSONException e) {
             Log.e(TAG, "خطأ بقراءة الطلب المكتمل: " + e.getMessage());
             devicePendingResponses.put(macAddress, "{}");

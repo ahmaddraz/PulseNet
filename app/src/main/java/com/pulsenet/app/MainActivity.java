@@ -8,6 +8,8 @@ import android.os.Build;
 import android.os.Bundle;
 import android.view.Gravity;
 import android.view.View;
+import android.widget.FrameLayout;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -19,9 +21,9 @@ import androidx.core.content.ContextCompat;
 import androidx.core.graphics.Insets;
 import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowInsetsCompat;
+import androidx.lifecycle.ViewModelProvider;
 
 import com.pulsenet.app.ble.PermissionHelper;
-import com.pulsenet.app.data.DatabaseHelper;
 import com.pulsenet.app.data.Item;
 import com.pulsenet.app.service.PulseNetService;
 
@@ -30,20 +32,22 @@ import java.util.List;
 public class MainActivity extends AppCompatActivity {
 
     private BluetoothAdapter bluetoothAdapter;
-    private DatabaseHelper databaseHelper;
+    private MainViewModel viewModel;
     private TextView textDeviceCount;
     private TextView textEmptyItems;
     private LinearLayout containerItems;
 
+    // معالج تفعيل البلوتوث
     private final ActivityResultLauncher<Intent> enableBtLauncher =
             registerForActivityResult(new ActivityResultContracts.StartActivityForResult(), result -> {
                 if (bluetoothAdapter != null && bluetoothAdapter.isEnabled()) {
                     startPulseNetService();
                 } else {
-                    Toast.makeText(this, "لازم تفعّل البلوتوث حتى يشتغل PulseNet", Toast.LENGTH_LONG).show();
+                    Toast.makeText(this, "يجب تفعيل البلوتوث لعمل تطبيق PulseNet", Toast.LENGTH_LONG).show();
                 }
             });
 
+    // معالج طلب الصلاحيات
     private final ActivityResultLauncher<String[]> permissionLauncher =
             registerForActivityResult(new ActivityResultContracts.RequestMultiplePermissions(), grantResults -> {
                 boolean allGranted = true;
@@ -56,9 +60,7 @@ public class MainActivity extends AppCompatActivity {
                 if (allGranted) {
                     ensureBluetoothEnabledThenStart();
                 } else {
-                    Toast.makeText(this,
-                            "بدون هالصلاحيات ما بيقدر PulseNet يكتشف الأجهزة القريبة",
-                            Toast.LENGTH_LONG).show();
+                    Toast.makeText(this, "التطبيق يحتاج لصلاحيات البلوتوث والموقع لاكتشاف الأجهزة", Toast.LENGTH_LONG).show();
                 }
             });
 
@@ -67,38 +69,58 @@ public class MainActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
-        ViewCompat.setOnApplyWindowInsetsListener(findViewById(R.id.main), (v, insets) -> {
-            Insets systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars());
-            v.setPadding(v.getPaddingLeft(), systemBars.top, v.getPaddingRight(), systemBars.bottom);
-            return insets;
-        });
+        // إعداد الحواف (Edge-to-Edge)
+        View mainView = findViewById(R.id.main);
+        if (mainView != null) {
+            ViewCompat.setOnApplyWindowInsetsListener(mainView, (v, insets) -> {
+                Insets systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars());
+                v.setPadding(v.getPaddingLeft(), systemBars.top, v.getPaddingRight(), systemBars.bottom);
+                return insets;
+            });
+        }
 
+        // ربط العناصر
         textDeviceCount = findViewById(R.id.text_device_count);
         textEmptyItems = findViewById(R.id.text_empty_items);
         containerItems = findViewById(R.id.container_items);
-        databaseHelper = new DatabaseHelper(this);
 
+        // 1. تهيئة الـ ViewModel (المسؤول عن البيانات)
+        viewModel = new ViewModelProvider(this).get(MainViewModel.class);
+
+        // 2. مراقبة البيانات (التحديث التلقائي اللحظي)
+        viewModel.getItems().observe(this, this::displayItems);
+
+        viewModel.getDeviceCount().observe(this, count -> {
+            if (textDeviceCount != null) {
+                textDeviceCount.setText(String.format("%d أجهزة متصلة الآن", count));
+            }
+        });
+
+        // إعداد البلوتوث
         BluetoothManager bluetoothManager = (BluetoothManager) getSystemService(BLUETOOTH_SERVICE);
         bluetoothAdapter = bluetoothManager != null ? bluetoothManager.getAdapter() : null;
 
-        findViewById(R.id.button_add).setOnClickListener(v -> {
-            startActivity(new Intent(MainActivity.this, AddInfoActivity.class));
-        });
+        // إعداد الأزرار
+        setupButtons();
 
-        findViewById(R.id.button_settings).setOnClickListener(v -> {
-            startActivity(new Intent(MainActivity.this, SettingsActivity.class));
-        });
-
-        findViewById(R.id.button_notifications).setOnClickListener(v -> {
-            startActivity(new Intent(MainActivity.this, NotificationsActivity.class));
-        });
-
+        // بدء طلب الصلاحيات وتشغيل الخدمة
         requestPermissionsThenStart();
+    }
+
+    private void setupButtons() {
+        View btnAdd = findViewById(R.id.button_add);
+        if (btnAdd != null) btnAdd.setOnClickListener(v -> startActivity(new Intent(this, AddInfoActivity.class)));
+
+        View btnSettings = findViewById(R.id.button_settings);
+        if (btnSettings != null) btnSettings.setOnClickListener(v -> startActivity(new Intent(this, SettingsActivity.class)));
+
+        View btnNotif = findViewById(R.id.button_notifications);
+        if (btnNotif != null) btnNotif.setOnClickListener(v -> startActivity(new Intent(this, NotificationsActivity.class)));
     }
 
     private void requestPermissionsThenStart() {
         if (bluetoothAdapter == null) {
-            Toast.makeText(this, "هذا الجهاز ما بيدعم البلوتوث", Toast.LENGTH_LONG).show();
+            Toast.makeText(this, "هذا الجهاز لا يدعم البلوتوث", Toast.LENGTH_LONG).show();
             return;
         }
         if (PermissionHelper.hasAllBlePermissions(this)) {
@@ -129,111 +151,109 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    private void updateDeviceCountDisplay() {
-        int count = databaseHelper.getActiveDeviceCount();
-        textDeviceCount.setText(count + " أجهزة متصلة الآن");
-    }
-
     @Override
     protected void onResume() {
         super.onResume();
-        updateDeviceCountDisplay();
-        loadItems();
+        // تحديث البيانات عند العودة للتطبيق لضمان المزامنة
+        viewModel.refreshData();
     }
 
-    private void loadItems() {
+    private void displayItems(List<Item> items) {
+        if (containerItems == null) return;
+
         containerItems.removeAllViews();
-
-        List<Item> items = databaseHelper.getAllItems();
-
-        if (items.isEmpty()) {
+        if (items == null || items.isEmpty()) {
             textEmptyItems.setVisibility(View.VISIBLE);
             return;
         }
-        textEmptyItems.setVisibility(View.GONE);
 
+        textEmptyItems.setVisibility(View.GONE);
         for (Item item : items) {
-            containerItems.addView(buildItemCard(item));
+            if (item != null) {
+                containerItems.addView(buildItemCard(item));
+            }
         }
     }
 
-    private LinearLayout buildItemCard(Item item) {
+    private View buildItemCard(Item item) {
         int borderDrawable;
-        String emoji;
-        int iconColor;
+        int iconDrawable;
+        int iconChipBg;
 
+        // تحديد التصميم بناءً على نوع العنصر
         switch (item.getType()) {
             case Item.TYPE_ALERT:
                 borderDrawable = R.drawable.bg_card_border_orange;
-                emoji = "⚠";
-                iconColor = getColor(R.color.color_accent_orange);
+                iconDrawable = R.drawable.ic_alert;
+                iconChipBg = R.drawable.bg_icon_circle_orange;
                 break;
-            case Item.TYPE_SERVICE:
             case Item.TYPE_AID:
                 borderDrawable = R.drawable.bg_card_border_cyan;
-                emoji = "✚";
-                iconColor = getColor(R.color.color_button_cyan);
+                iconDrawable = R.drawable.ic_aid;
+                iconChipBg = R.drawable.bg_icon_circle_cyan;
                 break;
-            default: // location أو أي شي تاني
+            default:
                 borderDrawable = R.drawable.bg_card_border_grey;
-                emoji = "📍";
-                iconColor = getColor(R.color.color_text_secondary);
+                iconDrawable = R.drawable.ic_location;
+                iconChipBg = R.drawable.bg_icon_circle_grey;
                 break;
         }
 
+        // بناء الـ Card الرئيسي
         LinearLayout card = new LinearLayout(this);
         card.setOrientation(LinearLayout.HORIZONTAL);
         card.setGravity(Gravity.CENTER_VERTICAL);
         card.setBackgroundResource(borderDrawable);
-        LinearLayout.LayoutParams cardParams = new LinearLayout.LayoutParams(
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        cardParams.bottomMargin = dpToPx(14);
-        card.setLayoutParams(cardParams);
+        params.bottomMargin = dpToPx(12);
+        card.setLayoutParams(params);
         card.setPadding(dpToPx(12), dpToPx(10), dpToPx(12), dpToPx(10));
 
+        // عمود النصوص (العنوان والوقت)
         LinearLayout textColumn = new LinearLayout(this);
         textColumn.setOrientation(LinearLayout.VERTICAL);
-        textColumn.setGravity(Gravity.RIGHT);
-        LinearLayout.LayoutParams columnParams = new LinearLayout.LayoutParams(
-                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
-        textColumn.setLayoutParams(columnParams);
+        textColumn.setGravity(Gravity.END);
+        textColumn.setLayoutParams(new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
 
         TextView title = new TextView(this);
         title.setText(item.getTitle());
-        title.setTextColor(getColor(R.color.white));
-        title.setTextSize(11.5f);
+        title.setTextColor(ContextCompat.getColor(this, R.color.white));
+        title.setTextSize(14f);
         title.setTypeface(null, Typeface.BOLD);
-        title.setGravity(Gravity.RIGHT);
+        title.setGravity(Gravity.END);
 
         TextView subtitle = new TextView(this);
-        long minutesAgo = (System.currentTimeMillis() - item.getCreatedAt()) / 1000 / 60;
-        String hopsText = item.getHopCount() == 0 ? "بدون قفزات" : ("قفزات: " + item.getHopCount());
-        subtitle.setText("منذ " + minutesAgo + " دقيقة · " + hopsText);
-        subtitle.setTextColor(getColor(R.color.color_text_secondary));
-        subtitle.setTextSize(9.5f);
-        subtitle.setGravity(Gravity.RIGHT);
-        LinearLayout.LayoutParams subtitleParams = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        subtitleParams.topMargin = dpToPx(3);
-        subtitle.setLayoutParams(subtitleParams);
+        long diff = System.currentTimeMillis() - item.getCreatedAt();
+        long minutes = Math.max(0, diff / 60000);
+        String info = "منذ " + minutes + " د · " + (item.getHopCount() == 0 ? "مباشر" : item.getHopCount() + " قفزات");
+        subtitle.setText(info);
+        subtitle.setTextColor(ContextCompat.getColor(this, R.color.color_text_secondary));
+        subtitle.setTextSize(11f);
+        subtitle.setGravity(Gravity.END);
 
         textColumn.addView(title);
         textColumn.addView(subtitle);
 
-        TextView icon = new TextView(this);
-        icon.setText(emoji);
-        icon.setTextColor(iconColor);
-        icon.setTextSize(14f);
-        LinearLayout.LayoutParams iconParams = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        iconParams.setMarginStart(dpToPx(8));
+        // أيقونة الحالة
+        FrameLayout iconChip = new FrameLayout(this);
+        iconChip.setBackgroundResource(iconChipBg);
+        LinearLayout.LayoutParams chipParams = new LinearLayout.LayoutParams(dpToPx(36), dpToPx(36));
+        chipParams.setMarginStart(dpToPx(10));
+        iconChip.setLayoutParams(chipParams);
+
+        ImageView icon = new ImageView(this);
+        icon.setImageResource(iconDrawable);
+        FrameLayout.LayoutParams iconParams = new FrameLayout.LayoutParams(dpToPx(18), dpToPx(18));
+        iconParams.gravity = Gravity.CENTER;
         icon.setLayoutParams(iconParams);
+        iconChip.addView(icon);
 
         card.addView(textColumn);
-        card.addView(icon);
+        card.addView(iconChip);
 
         card.setOnClickListener(v -> {
-            Intent intent = new Intent(MainActivity.this, InfoDetailActivity.class);
+            Intent intent = new Intent(this, InfoDetailActivity.class);
             intent.putExtra("item_id", item.getId());
             startActivity(intent);
         });
@@ -242,7 +262,6 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private int dpToPx(int dp) {
-        float density = getResources().getDisplayMetrics().density;
-        return Math.round(dp * density);
+        return Math.round(dp * getResources().getDisplayMetrics().density);
     }
 }

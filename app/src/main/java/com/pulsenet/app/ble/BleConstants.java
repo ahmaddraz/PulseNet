@@ -29,6 +29,19 @@ public class BleConstants {
     public static final long SCAN_PERIOD_MS = 15_000L;
     public static final long SCAN_REST_MS = 5_000L;
 
+    // ================= حدود حجم الرسائل عبر BLE (مهم جداً!) =================
+    // مواصفات بروتوكول BLE (ATT) بتحدد حد أقصى مطلق لأي "قيمة خاصية" واحدة
+    // (Characteristic Value) بـ 512 بايت. أي محاولة نرسل فيها JSON أكبر من
+    // هيك بعملية قراءة/كتابة وحدة، بينقص/يتقطع الكلام بصمت (بدون أي Exception
+    // واضح)، وهذا كان سبب مشاكل "ضياع/تسرب" معلومات لما تراكم عدد المعلومات
+    // أو طال نص أي معلومة. لهيك، ما عاد نرسل "كل شي دفعة وحدة": صرنا نتبادل
+    // الملخص على شكل صفحات صغيرة (Pagination)، ونطلب المعلومات الناقصة وحدة
+    // وحدة، مع هامش أمان تحت الـ 512 بايت.
+    public static final int BLE_ATTRIBUTE_HARD_LIMIT_BYTES = 512;
+    public static final int SAFE_RESPONSE_BYTES = 460; // هامش أمان تحت الحد الأقصى
+    public static final int SUMMARY_PAGE_SIZE = 6; // عدد أقصى تقريبي للمدخلات بكل صفحة ملخص
+    public static final int ITEMS_BATCH_SIZE = 1;  // نطلب معلومة كاملة وحدة بكل مرة (أضمن حل)
+
     private BleConstants() {
         // كلاس أدوات فقط - ما بننشئ منه كائنات
     }

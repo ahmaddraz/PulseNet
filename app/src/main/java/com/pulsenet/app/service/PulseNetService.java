@@ -41,17 +41,32 @@ public class PulseNetService extends Service {
     private DatabaseHelper databaseHelper;
     private NotificationHelper notificationHelper;
 
+    // اسم الجهاز (myDeviceName) عمداً مش مخزّن كحقل هون - نجيبه دايماً بشكل حي
+    // من DeviceIdentity.getDeviceName() وقت الحاجة، حتى لو المستخدم غيّر اسمه
+    // من شاشة الإعدادات وهو التطبيق شغال، يظهر فوراً بالمزامنة الجاية.
     private String myDeviceId;
-    private String myDeviceName;
 
     private final Map<String, Long> lastSyncTimeByDevice = new HashMap<>();
     private static final long RESYNC_INTERVAL_MS = 20_000L;
+
+    // مهلة أمان لكل محاولة اتصال. كانت 12 ثانية بس هذا كان قصير: كل معلومة
+    // ناقصة بتاخد جولة كاملة (كتابة طلب + قراءة رد)، فإذا تراكم عدد
+    // المعلومات الناقصة، كانت المهلة تنتهي دايماً قبل ما توصل آخر المعلومات
+    // بالترتيب - وهذا سبب رئيسي محتمل وراء ظاهرة "بعض المعلومات ما بتوصل"
+    // بشكل دائم ومتكرر لنفس المعلومات. رفعناها لـ 40 ثانية لإعطاء مجال أكبر
+    // (راجع كمان BleGattClient.finishWithPartialResultsAndForceClose أدناه).
+    private static final long SYNC_TIMEOUT_MS = 40_000L;
 
     private final Map<String, Long> lastRangeNotifyTimeByDevice = new HashMap<>();
     private static final long RANGE_NOTIFY_COOLDOWN_MS = 5 * 60 * 1000L;
 
     // تتبع الأجهزة التي يجري الاتصال بها حالياً بناءً على الـ MAC Address لتفادي الحظر الشامل
     private final Set<String> activeSyncingMacs = Collections.synchronizedSet(new HashSet<>());
+
+    // تتبع كل اتصال GATT جاري حالياً (كـ Client) حتى نقدر نقفلهم كلهم فوراً
+    // إذا انطفت الخدمة وهم لسا شغالين (مثلاً المستخدم طفّى البث من الإعدادات)
+    private final Map<String, BleGattClient> activeClients = Collections.synchronizedMap(new HashMap<>());
+
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
 
     private volatile boolean bleOperationsStarted = false;
@@ -70,8 +85,7 @@ public class PulseNetService extends Service {
         databaseHelper = new DatabaseHelper(this);
 
         myDeviceId = DeviceIdentity.getDeviceId(this);
-        myDeviceName = DeviceIdentity.getDeviceName(this);
-        Log.i(TAG, "هويتنا: id=" + myDeviceId + " name=" + myDeviceName);
+        Log.i(TAG, "هويتنا: id=" + myDeviceId + " name=" + DeviceIdentity.getDeviceName(this));
 
         BluetoothManager bluetoothManager = (BluetoothManager) getSystemService(BLUETOOTH_SERVICE);
         bluetoothAdapter = bluetoothManager != null ? bluetoothManager.getAdapter() : null;
@@ -81,19 +95,23 @@ public class PulseNetService extends Service {
 
         bleGattServer = new BleGattServer(this, new BleGattServer.DataProvider() {
             @Override
-            public String getSummaryJson() {
-                return databaseHelper.getItemsSummaryAsJson(myDeviceId, myDeviceName);
+            public String getSummaryPageJson(int cursor) {
+                // بنجيب الاسم الحالي دايماً من DeviceIdentity (مش من حقل مخزّن)
+                // حتى إذا المستخدم غيّر اسمه من الإعدادات، يظهر فوراً بالمزامنة
+                // الجاية بدون ما يحتاج يعيد تشغيل الخدمة.
+                return databaseHelper.getItemsSummaryPageAsJson(cursor, myDeviceId, DeviceIdentity.getDeviceName(PulseNetService.this));
             }
 
             @Override
             public String getItemsForIds(List<String> ids) {
-                return databaseHelper.getItemsByIdsAsJson(ids, myDeviceId, myDeviceName);
+                return databaseHelper.getItemsByIdsAsJson(ids, myDeviceId, DeviceIdentity.getDeviceName(PulseNetService.this));
             }
 
             @Override
             public void onDeviceRequestReceived(String requesterDeviceId, String requesterDeviceName, String mac) {
                 long now = System.currentTimeMillis();
                 databaseHelper.upsertDevice(requesterDeviceId, mac, requesterDeviceName, 0, now);
+                sendUpdateBroadcast(); // ستقوم هذه الدالة بتنبيه الشاشة الرئيسية فوراً
                 Log.i(TAG, "سجّلنا الجهاز الطالب من جهتنا: " + requesterDeviceName);
             }
         });
@@ -187,23 +205,30 @@ public class PulseNetService extends Service {
         long now = System.currentTimeMillis();
         long syncStartTime = System.currentTimeMillis();
 
-        BleGattClient client = new BleGattClient(this, myDeviceId, myDeviceName);
+        BleGattClient client = new BleGattClient(this, myDeviceId, DeviceIdentity.getDeviceName(this));
+        activeClients.put(mac, client);
 
-        // مهلة أمان: 12 ثانية لكل جهاز بشكل مستقل
+        // مهلة أمان مستقلة لكل جهاز (راجع تعليق SYNC_TIMEOUT_MS بأعلى الكلاس)
         final Runnable timeoutRunnable = () -> {
             if (activeSyncingMacs.contains(mac)) {
-                Log.e(TAG, "انتهت مهلة الاتصال للجهاز (" + mac + ") - عم نفك القفل يدوياً");
-                client.disconnect();
+                Log.e(TAG, "انتهت مهلة الاتصال للجهاز (" + mac + ") - عم نسلّم يلي وصلنا ونفك القفل");
+                // finishWithPartialResultsAndForceClose (مش forceClose المباشرة):
+                // إذا كنا نجحنا نجمع أي معلومات لحد هلق بهاي الجولة، منسلّمها
+                // ومنحفظها بقاعدة البيانات بدل ما نرميها بالكامل. الباقي
+                // (يلي لسا ناقص) رح ينطلب تلقائياً بمحاولة الاتصال الجاية.
+                client.finishWithPartialResultsAndForceClose();
                 activeSyncingMacs.remove(mac);
+                activeClients.remove(mac);
             }
         };
-        mainHandler.postDelayed(timeoutRunnable, 12_000L);
+        mainHandler.postDelayed(timeoutRunnable, SYNC_TIMEOUT_MS);
 
         client.connectAndFetchItems(device, new BleGattClient.ItemsReceivedListener() {
             @Override
             public void onItemsReceived(String json) {
                 mainHandler.removeCallbacks(timeoutRunnable);
                 activeSyncingMacs.remove(mac);
+                activeClients.remove(mac);
 
                 String senderId = null;
                 String senderName = "جهاز PulseNet";
@@ -220,14 +245,14 @@ public class PulseNetService extends Service {
                 }
 
                 databaseHelper.upsertDevice(senderId, mac, senderName, rssi, now);
-
+                sendUpdateBroadcast(); // ستقوم هذه الدالة بتنبيه الشاشة الرئيسية فوراً
                 Long lastRangeNotify = lastRangeNotifyTimeByDevice.get(senderId);
                 if (lastRangeNotify == null || (now - lastRangeNotify) > RANGE_NOTIFY_COOLDOWN_MS) {
                     lastRangeNotifyTimeByDevice.put(senderId, now);
                     notificationHelper.showDeviceInRangeNotification(senderName);
                 }
 
-                int[] result = databaseHelper.importRequestedItemsFromJson(json, senderId);
+                int[] result = databaseHelper.importReceivedItems(json, senderId);
                 int importedCount = result[0];
                 int duplicateCount = result[1];
 
@@ -244,6 +269,7 @@ public class PulseNetService extends Service {
             public void onConnectionFailed() {
                 mainHandler.removeCallbacks(timeoutRunnable);
                 activeSyncingMacs.remove(mac);
+                activeClients.remove(mac);
             }
         });
     }
@@ -256,8 +282,21 @@ public class PulseNetService extends Service {
         activeSyncingMacs.clear();
         mainHandler.removeCallbacksAndMessages(null);
 
+        // إغلاق أي اتصالات Client لسا مفتوحة بدل ما نسيبها معلّقة
+        for (BleGattClient client : activeClients.values()) {
+            client.forceClose();
+        }
+        activeClients.clear();
+
         if (bleAdvertiser != null) bleAdvertiser.stopAdvertising();
         if (bleScanner != null) bleScanner.stopScanning();
         if (bleGattServer != null) bleGattServer.stop();
+    }
+
+    /** يرسل بثاً داخلياً بس لمكونات تطبيقنا لتحديث الشاشة الرئيسية فوراً */
+    private void sendUpdateBroadcast() {
+        Intent intent = new Intent("com.pulsenet.UPDATE_UI");
+        intent.setPackage(getPackageName());
+        sendBroadcast(intent);
     }
 }

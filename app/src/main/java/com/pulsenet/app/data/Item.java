@@ -1,7 +1,10 @@
 package com.pulsenet.app.data;
 
+import com.pulsenet.app.ble.BleConstants;
+
 import org.json.JSONException;
 import org.json.JSONObject;
+import java.nio.charset.StandardCharsets;
 
 /**
  * يمثل "معلومة" واحدة بالتطبيق، مطابق لمخطط ER الأكاديمي المعتمد.
@@ -154,12 +157,40 @@ public class Item {
     public boolean isHiddenLocally() { return isHiddenLocally; }
     public void setHiddenLocally(boolean hiddenLocally) { isHiddenLocally = hiddenLocally; }
 
-    /** تحويل آمن لمنع الـ NullPointerExceptions عند إنشاء الـ JSON */
+    /**
+     * تحويل آمن لمنع الـ NullPointerExceptions عند إنشاء الـ JSON.
+     *
+     * ملاحظة مهمة: بروتوكول BLE (ATT) بيحدد حد أقصى مطلق 512 بايت لأي
+     * "قيمة خاصية" (Characteristic Value) وحدة. لو رجّعنا JSON أكبر من هيك،
+     * الجهاز التاني كان يستقبل نسخة مقطوعة/تالفة بصمت (بدون خطأ واضح) —
+     * وهذا هو السبب الحقيقي وراء مشاكل "ضياع/تسرب" المعلومات أثناء النقل،
+     * خصوصاً مع نصوص طويلة أو نصوص عربية (يلي بتاخد بايتين لكل حرف بترميز UTF-8).
+     * لهيك، إذا حسّينا إنه الحجم قارب يتجاوز الحد الآمن، منقصّر التفاصيل
+     * (body ثم title) تدريجياً لحد ما توصل لحجم آمن، بدل ما نرسلها ناقصة
+     * بطريقة عشوائية يتحكم فيها الـ Bluetooth stack.
+     */
     public JSONObject toJson() throws JSONException {
+        String safeTitle = title != null ? title : "";
+        String safeBody = body != null ? body : "";
+
+        JSONObject obj = buildJsonInternal(safeTitle, safeBody);
+
+        while (utf8ByteLength(obj.toString()) > BleConstants.SAFE_RESPONSE_BYTES && safeBody.length() > 10) {
+            safeBody = safeBody.substring(0, safeBody.length() - 10) + "…";
+            obj = buildJsonInternal(safeTitle, safeBody);
+        }
+        while (utf8ByteLength(obj.toString()) > BleConstants.SAFE_RESPONSE_BYTES && safeTitle.length() > 10) {
+            safeTitle = safeTitle.substring(0, safeTitle.length() - 5) + "…";
+            obj = buildJsonInternal(safeTitle, safeBody);
+        }
+        return obj;
+    }
+
+    private JSONObject buildJsonInternal(String titleValue, String bodyValue) throws JSONException {
         JSONObject obj = new JSONObject();
         obj.put("id", id != null ? id : "");
-        obj.put("title", title != null ? title : "");
-        obj.put("body", body != null ? body : "");
+        obj.put("title", titleValue);
+        obj.put("body", bodyValue);
         obj.put("type", type != null ? type : TYPE_ALERT);
         obj.put("area", area != null ? area : "");
         obj.put("priority", priority != null ? priority : "");
@@ -173,6 +204,10 @@ public class Item {
         obj.put("hopCount", hopCount);
         obj.put("maxHops", maxHops);
         return obj;
+    }
+
+    private static int utf8ByteLength(String s) {
+        return s.getBytes(StandardCharsets.UTF_8).length;
     }
 
     /** تحويل آمن من JSON إلى كائن Item */

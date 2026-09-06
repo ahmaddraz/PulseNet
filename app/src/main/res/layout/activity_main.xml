@@ -13,26 +13,37 @@
         android:orientation="vertical"
         android:padding="20dp">
 
+        <!-- الهيدر -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:gravity="center_vertical"
             android:orientation="horizontal">
 
-            <TextView
+            <FrameLayout
                 android:id="@+id/button_settings"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="⚙️"
-                android:textSize="16sp" />
+                android:layout_width="34dp"
+                android:layout_height="34dp"
+                android:background="@drawable/bg_icon_chip">
+                <ImageView
+                    android:layout_width="16dp"
+                    android:layout_height="16dp"
+                    android:layout_gravity="center"
+                    android:src="@drawable/carbon_settings" />
+            </FrameLayout>
 
-            <TextView
+            <FrameLayout
                 android:id="@+id/button_notifications"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="12dp"
-                android:text="🔔"
-                android:textSize="16sp" />
+                android:layout_width="34dp"
+                android:layout_height="34dp"
+                android:layout_marginStart="8dp"
+                android:background="@drawable/bg_icon_chip">
+                <ImageView
+                    android:layout_width="16dp"
+                    android:layout_height="16dp"
+                    android:layout_gravity="center"
+                    android:src="@drawable/ic_bell" />
+            </FrameLayout>
 
             <View
                 android:layout_width="0dp"
@@ -66,57 +77,7 @@
 
         </LinearLayout>
 
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="24dp"
-            android:orientation="horizontal"
-            android:gravity="end">
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:background="@drawable/bg_pill_inactive"
-                android:paddingStart="12dp"
-                android:paddingEnd="12dp"
-                android:paddingTop="6dp"
-                android:paddingBottom="6dp"
-                android:text="تنبيهات"
-                android:textColor="@color/color_text_secondary"
-                android:textSize="10.5sp"
-                android:textStyle="bold" />
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="8dp"
-                android:background="@drawable/bg_pill_inactive"
-                android:paddingStart="12dp"
-                android:paddingEnd="12dp"
-                android:paddingTop="6dp"
-                android:paddingBottom="6dp"
-                android:text="خدمات"
-                android:textColor="@color/color_text_secondary"
-                android:textSize="10.5sp"
-                android:textStyle="bold" />
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="8dp"
-                android:background="@drawable/bg_pill_active"
-                android:paddingStart="12dp"
-                android:paddingEnd="12dp"
-                android:paddingTop="6dp"
-                android:paddingBottom="6dp"
-                android:text="طوارئ"
-                android:textColor="@color/color_background"
-                android:textSize="10.5sp"
-                android:textStyle="bold" />
-
-        </LinearLayout>
-
-        <!-- نص حالة فارغة (يظهر لو ما في معلومات محفوظة) -->
+        <!-- نص حالة فارغة -->
         <TextView
             android:id="@+id/text_empty_items"
             android:layout_width="match_parent"
@@ -132,7 +93,7 @@
             android:layout_width="match_parent"
             android:layout_height="0dp"
             android:layout_weight="1"
-            android:layout_marginTop="20dp">
+            android:layout_marginTop="24dp">
 
             <LinearLayout
                 android:id="@+id/container_items"

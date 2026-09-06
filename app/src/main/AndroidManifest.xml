@@ -18,13 +18,15 @@
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" /> <!-- صلاحية الإشعارات (لازمة من أندرويد 13 فما فوق) -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" /> <!-- صلاحية تشغيل خدمة خلفية دايمة (Foreground Service) خاصة بالبلوتوث -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" /> <!-- التطبيق يحتاج BLE فعلياً بشكل أساسي -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" /> <!-- صلاحية الإنترنت (لازمة لمزامنة لوحة تحكم الأدمن عبر السيرفر لاحقاً) -->
+    <uses-permission android:name="android.permission.INTERNET" /> <!-- التطبيق يحتاج BLE فعلياً بشكل أساسي -->
     <uses-feature
         android:name="android.hardware.bluetooth_le"
         android:required="true" />
 
     <application
         android:allowBackup="true"
+        android:networkSecurityConfig="@xml/network_security_config"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
         android:icon="@mipmap/ic_launcher"

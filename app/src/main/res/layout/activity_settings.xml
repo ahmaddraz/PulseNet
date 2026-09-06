@@ -12,7 +12,6 @@
     android:paddingStart="20dp"
     android:paddingEnd="20dp">
 
-    <!-- العنوان -->
     <TextView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -23,22 +22,24 @@
         android:gravity="right"
         android:textAlignment="viewEnd" />
 
-    <!-- صف الملف الشخصي -->
+    <!-- بطاقة الملف الشخصي -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="14dp"
+        android:layout_marginTop="16dp"
         android:orientation="horizontal"
-        android:gravity="center_vertical">
+        android:gravity="center_vertical"
+        android:background="@drawable/bg_card_grouped"
+        android:padding="14dp">
 
         <FrameLayout
-            android:layout_width="34dp"
-            android:layout_height="34dp"
-            android:background="@drawable/bg_icon_circle">
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:background="@drawable/bg_avatar_gradient">
 
             <ImageView
-                android:layout_width="16dp"
-                android:layout_height="16dp"
+                android:layout_width="18dp"
+                android:layout_height="18dp"
                 android:layout_gravity="center"
                 android:src="@drawable/ic_person" />
 
@@ -75,150 +76,237 @@
 
     </LinearLayout>
 
-    <!-- صف: البث المستمر -->
+    <!-- بطاقة الخيارات الموحّدة -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="8dp"
-        android:orientation="horizontal"
-        android:gravity="center_vertical"
-        android:paddingTop="9dp"
-        android:paddingBottom="9dp">
+        android:layout_marginTop="12dp"
+        android:orientation="vertical"
+        android:background="@drawable/bg_card_grouped">
 
-        <Switch
-            android:id="@+id/switch_broadcast"
-            android:layout_width="wrap_content"
+        <!-- البث المستمر -->
+        <LinearLayout
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:checked="true"
-            android:thumbTint="@color/white"
-            android:trackTint="@color/color_button_cyan" />
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:padding="14dp">
 
-        <View
-            android:layout_width="0dp"
-            android:layout_height="1dp"
-            android:layout_weight="1" />
+            <Switch
+                android:id="@+id/switch_broadcast"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:checked="true"
+                android:thumbTint="@color/white"
+                android:trackTint="@color/color_button_cyan" />
 
-        <TextView
-            android:layout_width="wrap_content"
+            <View
+                android:layout_width="0dp"
+                android:layout_height="1dp"
+                android:layout_weight="1" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="12dp"
+                android:text="البث المستمر"
+                android:textColor="@color/white"
+                android:textSize="12.5sp" />
+
+            <FrameLayout
+                android:layout_width="32dp"
+                android:layout_height="32dp"
+                android:background="@drawable/bg_icon_circle_cyan">
+
+                <ImageView
+                    android:layout_width="16dp"
+                    android:layout_height="16dp"
+                    android:layout_gravity="center"
+                    android:src="@drawable/ic_bluetooth" />
+            </FrameLayout>
+
+
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="📶 البث المستمر"
-            android:textColor="@color/white"
-            android:textSize="13sp" />
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:padding="14dp">
+
+            <Switch
+                android:id="@+id/switch_notifications"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:checked="true"
+                android:thumbTint="@color/white"
+                android:trackTint="@color/color_button_cyan" />
+
+            <View
+                android:layout_width="0dp"
+                android:layout_height="1dp"
+                android:layout_weight="1" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="12dp"
+                android:text="الإشعارات المحلية"
+                android:textColor="@color/white"
+                android:textSize="12.5sp" />
+
+            <FrameLayout
+                android:layout_width="32dp"
+                android:layout_height="32dp"
+                android:background="@drawable/bg_icon_circle_orange">
+
+                <ImageView
+                    android:layout_width="16dp"
+                    android:layout_height="16dp"
+                    android:layout_gravity="center"
+                    android:src="@drawable/ic_bell" />
+            </FrameLayout>
+
+        </LinearLayout>
+
+        <View android:layout_width="match_parent" android:layout_height="1dp"
+            android:layout_marginStart="14dp" android:layout_marginEnd="14dp"
+            android:background="#1A2233" />
+
+        <!-- الإشعارات المحلية -->
+
+        <View android:layout_width="match_parent" android:layout_height="1dp"
+            android:layout_marginStart="14dp" android:layout_marginEnd="14dp"
+            android:background="#1A2233" />
+
+        <!-- الأجهزة المتصلة -->
+        <LinearLayout
+            android:id="@+id/row_devices"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:padding="14dp">
+
+            <FrameLayout
+                android:layout_width="32dp"
+                android:layout_height="32dp"
+                android:background="@drawable/bg_icon_circle_grey">
+                <ImageView
+                    android:layout_width="32dp"
+                    android:layout_height="32dp"
+                    android:layout_gravity="center"
+                    android:src="@drawable/ic_arrow_left" />
+            </FrameLayout>
+
+            <View
+                android:layout_width="0dp"
+                android:layout_height="1dp"
+                android:layout_weight="1" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="12dp"
+                android:text="الأجهزة المتصلة"
+                android:textColor="@color/white"
+                android:textSize="12.5sp" />
+
+            <FrameLayout
+                android:layout_width="32dp"
+                android:layout_height="32dp"
+                android:background="@drawable/bg_icon_circle_grey">
+                <ImageView
+                    android:layout_width="16dp"
+                    android:layout_height="16dp"
+                    android:layout_gravity="center"
+                    android:src="@drawable/ic_devices" />
+            </FrameLayout>
+
+        </LinearLayout>
+
+        <View android:layout_width="match_parent" android:layout_height="1dp"
+            android:layout_marginStart="14dp" android:layout_marginEnd="14dp"
+            android:background="#1A2233" />
+
+        <!-- مساحة التخزين -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:padding="14dp">
+
+            <TextView
+                android:id="@+id/text_storage_size"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="3.2MB"
+                android:textColor="@color/color_text_secondary"
+                android:textSize="11sp" />
+
+            <View
+                android:layout_width="0dp"
+                android:layout_height="1dp"
+                android:layout_weight="1" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="12dp"
+                android:text="مساحة التخزين"
+                android:textColor="@color/white"
+                android:textSize="12.5sp" />
+
+            <FrameLayout
+                android:layout_width="32dp"
+                android:layout_height="32dp"
+                android:background="@drawable/bg_icon_circle_grey">
+                <ImageView
+                    android:layout_width="16dp"
+                    android:layout_height="16dp"
+                    android:layout_gravity="center"
+                    android:src="@drawable/ic_database" />
+            </FrameLayout>
+
+        </LinearLayout>
 
     </LinearLayout>
 
-    <!-- صف: الإشعارات المحلية -->
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:gravity="center_vertical"
-        android:paddingTop="9dp"
-        android:paddingBottom="9dp">
-
-        <Switch
-            android:id="@+id/switch_notifications"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:checked="true"
-            android:thumbTint="@color/white"
-            android:trackTint="@color/color_button_cyan" />
-
-        <View
-            android:layout_width="0dp"
-            android:layout_height="1dp"
-            android:layout_weight="1" />
-
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="🔔 الإشعارات المحلية"
-            android:textColor="@color/white"
-            android:textSize="13sp" />
-
-    </LinearLayout>
-
-    <!-- صف: الأجهزة المتصلة -->
-    <LinearLayout
-        android:id="@+id/row_devices"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:gravity="center_vertical"
-        android:paddingTop="9dp"
-        android:paddingBottom="9dp">
-
-        <ImageView
-            android:layout_width="24dp"
-            android:layout_height="24dp"
-            android:src="@drawable/ic_chevron" />
-
-        <View
-            android:layout_width="0dp"
-            android:layout_height="1dp"
-            android:layout_weight="1" />
-
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="📱 الأجهزة المتصلة"
-            android:textColor="@color/white"
-            android:textSize="13sp" />
-
-    </LinearLayout>
-
-    <!-- صف: مساحة التخزين -->
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:gravity="center_vertical"
-        android:paddingTop="9dp"
-        android:paddingBottom="9dp">
-
-        <TextView
-            android:id="@+id/text_storage_size"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="3.2MB"
-            android:textColor="@color/color_text_secondary"
-            android:textSize="9.5sp" />
-
-        <View
-            android:layout_width="0dp"
-            android:layout_height="1dp"
-            android:layout_weight="1" />
-
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="💾 مساحة التخزين"
-            android:textColor="@color/white"
-            android:textSize="13sp" />
-
-    </LinearLayout>
-
-    <!-- مساحة فاضية تدفع الفوتر للأسفل -->
     <View
         android:layout_width="0dp"
         android:layout_height="0dp"
         android:layout_weight="1" />
 
     <!-- زر إعادة تشغيل الخدمة -->
-    <TextView
+    <LinearLayout
         android:id="@+id/button_restart_service"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginBottom="14dp"
-        android:background="@drawable/bg_option_inactive"
-        android:paddingTop="10dp"
-        android:paddingBottom="10dp"
-        android:text="🔄 أعد تشغيل البث والاكتشاف"
-        android:textColor="@color/white"
-        android:textSize="12sp"
-        android:gravity="center" />
+        android:background="@drawable/bg_button_cyan"
+        android:orientation="horizontal"
+        android:gravity="center"
+        android:paddingTop="13dp"
+        android:paddingBottom="13dp">
 
-    <!-- الفوتر -->
+        <ImageView
+            android:layout_width="16dp"
+            android:layout_height="16dp"
+            android:layout_marginEnd="8dp"
+            android:src="@drawable/ic_refresh" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="أعد تشغيل البث والاكتشاف"
+            android:textColor="@color/color_background"
+            android:textSize="12sp"
+            android:textStyle="bold" />
+
+    </LinearLayout>
+
     <TextView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"

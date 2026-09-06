@@ -2,10 +2,13 @@ package com.pulsenet.app;
 
 import android.os.Build;
 import android.os.Bundle;
+import android.text.InputType;
 import android.util.TypedValue;
+import android.widget.EditText;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.content.ContextCompat;
 import androidx.core.graphics.Insets;
@@ -17,6 +20,8 @@ import com.pulsenet.app.data.DeviceIdentity;
 import com.pulsenet.app.service.PulseNetService;
 
 public class SettingsActivity extends AppCompatActivity {
+
+    private TextView textDeviceName;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -70,9 +75,10 @@ public class SettingsActivity extends AppCompatActivity {
             startActivity(new android.content.Intent(this, NearbyDevicesActivity.class));
         });
 
-        // ---------- اسم الجهاز الثابت ----------
-        TextView textDeviceName = findViewById(R.id.text_device_name_value);
+        // ---------- اسم الجهاز (يقدر المستخدم يغيّره بنفسه، متل Bitchat) ----------
+        textDeviceName = findViewById(R.id.text_device_name_value);
         textDeviceName.setText(DeviceIdentity.getDeviceName(this));
+        textDeviceName.setOnClickListener(v -> showRenameDialog());
 
         // ---------- مساحة التخزين الحقيقية ----------
         DatabaseHelper databaseHelper = new DatabaseHelper(this);
@@ -93,5 +99,46 @@ public class SettingsActivity extends AppCompatActivity {
 
             Toast.makeText(this, "تم إعادة تشغيل PulseNet", Toast.LENGTH_SHORT).show();
         });
+    }
+
+    /**
+     * حوار بسيط لتغيير اسم الجهاز يدوياً - متل فكرة تطبيق Bitchat يلي كل
+     * مستخدم فيه بيكتب اسمه بنفسه بدل ما ينولّد له اسم عشوائي ما بيقدر
+     * يتحكم فيه أو يتذكره بعد إعادة تثبيت التطبيق.
+     *
+     * ملاحظة: الاسم الجديد بيصير مستخدم فوراً بالمزامنة الجاية بدون أي
+     * حاجة لإعادة تشغيل الخدمة، لأنه PulseNetService بيجيب الاسم بشكل حي
+     * من DeviceIdentity في كل مرة بدل ما يخزّنه مرة وحدة وقت البداية.
+     */
+    private void showRenameDialog() {
+        EditText input = new EditText(this);
+        input.setInputType(InputType.TYPE_CLASS_TEXT);
+        input.setHint("اكتب اسمك أو اسم جهازك");
+        input.setText(DeviceIdentity.getDeviceName(this));
+        input.setSelection(input.getText().length());
+        input.setFilters(new android.text.InputFilter[]{
+                new android.text.InputFilter.LengthFilter(DeviceIdentity.MAX_NAME_LENGTH)
+        });
+
+        int padding = (int) TypedValue.applyDimension(
+                TypedValue.COMPLEX_UNIT_DIP, 20, getResources().getDisplayMetrics());
+        input.setPadding(padding, padding / 2, padding, padding / 2);
+
+        new AlertDialog.Builder(this)
+                .setTitle("اسمك على الشبكة")
+                .setMessage("هاد الاسم رح يشوفه الأشخاص التانين لما تتبادلوا معلومات عبر PulseNet")
+                .setView(input)
+                .setPositiveButton("حفظ", (dialog, which) -> {
+                    String newName = input.getText().toString();
+                    boolean saved = DeviceIdentity.setDeviceName(this, newName);
+                    if (saved) {
+                        textDeviceName.setText(DeviceIdentity.getDeviceName(this));
+                        Toast.makeText(this, "تم حفظ اسمك بنجاح", Toast.LENGTH_SHORT).show();
+                    } else {
+                        Toast.makeText(this, "لازم تكتب اسم صحيح أول", Toast.LENGTH_SHORT).show();
+                    }
+                })
+                .setNegativeButton("إلغاء", null)
+                .show();
     }
 }

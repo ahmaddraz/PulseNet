@@ -69,7 +69,6 @@ public class NotificationHelper {
 
     /** يعرض إشعار فعلي وقت ما توصل معلومة أو معلومات جديدة من جهاز قريب */
     public void showNewItemsNotification(int count) {
-        SharedPreferencesHelper();
         if (!isNotificationsEnabled()) return; // المستخدم طفّى الإشعارات - ما منزعجه
 
         Intent openAppIntent = new Intent(context, MainActivity.class);
@@ -117,9 +116,5 @@ public class NotificationHelper {
         android.content.SharedPreferences prefs =
                 context.getSharedPreferences("pulsenet_prefs", Context.MODE_PRIVATE);
         return prefs.getBoolean("notifications_enabled", true);
-    }
-
-    // دالة فاضية - بقيت من مسودة سابقة، بلا أي استخدام فعلي
-    private void SharedPreferencesHelper() {
     }
 }
